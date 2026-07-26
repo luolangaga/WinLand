@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="WinIsland.Modules.Media.MediaExpandedView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <Style x:Key="TransportButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Padding" Value="10" />
+            <Setter Property="CornerRadius" Value="20" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid Padding="20,16,20,12" RowSpacing="6">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid ColumnSpacing="14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 大封面 -->
+            <Border
+                Width="72"
+                Height="72"
+                VerticalAlignment="Center"
+                Background="#33FFFFFF"
+                CornerRadius="14">
+                <Grid>
+                    <FontIcon
+                        FontSize="28"
+                        Foreground="White"
+                        Glyph="&#xE8D6;"
+                        Visibility="{x:Bind ViewModel.PlaceholderVisibility, Mode=OneWay}" />
+                    <Border CornerRadius="14" Visibility="{x:Bind ViewModel.ThumbnailVisibility, Mode=OneWay}">
+                        <Image
+                            Width="72"
+                            Height="72"
+                            Source="{x:Bind ViewModel.Thumbnail, Mode=OneWay}"
+                            Stretch="UniformToFill" />
+                    </Border>
+                </Grid>
+            </Border>
+
+            <StackPanel
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                Spacing="3">
+                <TextBlock
+                    FontSize="15"
+                    FontWeight="SemiBold"
+                    Foreground="White"
+                    MaxLines="1"
+                    Text="{x:Bind ViewModel.Title, Mode=OneWay}"
+                    TextTrimming="CharacterEllipsis" />
+                <TextBlock
+                    FontSize="13"
+                    Foreground="#99FFFFFF"
+                    MaxLines="1"
+                    Text="{x:Bind ViewModel.Artist, Mode=OneWay}"
+                    TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+        </Grid>
+
+        <!-- 播控 -->
+        <StackPanel
+            Grid.Row="1"
+            HorizontalAlignment="Center"
+            Orientation="Horizontal"
+            Spacing="18">
+            <Button Click="Previous_Click" Style="{StaticResource TransportButtonStyle}">
+                <FontIcon FontSize="16" Glyph="&#xE892;" />
+            </Button>
+            <Button Click="PlayPause_Click" Style="{StaticResource TransportButtonStyle}">
+                <FontIcon FontSize="20" Glyph="{x:Bind ViewModel.PlayPauseGlyph, Mode=OneWay}" />
+            </Button>
+            <Button Click="Next_Click" Style="{StaticResource TransportButtonStyle}">
+                <FontIcon FontSize="16" Glyph="&#xE893;" />
+            </Button>
+        </StackPanel>
+    </Grid>
+</UserControl>

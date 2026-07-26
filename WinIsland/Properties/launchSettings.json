@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "WinIsland (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "WinIsland (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

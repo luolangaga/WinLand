@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="WinIsland.Modules.Media.MediaIslandView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <Style x:Key="TransportButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Padding" Value="10" />
+            <Setter Property="CornerRadius" Value="20" />
+        </Style>
+    </UserControl.Resources>
+
+    <!-- 单一变形视图：所有元素常驻可视树，
+         紧凑↔展开之间动画各元素的位置/尺寸/透明度，实现 iOS 风格的流畅变形 -->
+    <Grid x:Name="RootGrid" Padding="8,0,14,0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- 主行：封面 + 标题/艺术家 + 音频条 -->
+        <Grid x:Name="MainGrid" Grid.Row="0" ColumnSpacing="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 封面：紧凑 26x26 → 展开 72x72，CornerRadius 7→14 -->
+            <Border
+                x:Name="Cover"
+                Width="26"
+                Height="26"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Center"
+                Background="#33FFFFFF"
+                CornerRadius="7">
+                <Grid>
+                    <FontIcon
+                        x:Name="PlaceholderIcon"
+                        FontSize="12"
+                        Foreground="White"
+                        Glyph="&#xE8D6;"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Visibility="{x:Bind ViewModel.PlaceholderVisibility, Mode=OneWay}" />
+                    <Image
+                        Source="{x:Bind ViewModel.Thumbnail, Mode=OneWay}"
+                        Stretch="UniformToFill"
+                        Visibility="{x:Bind ViewModel.ThumbnailVisibility, Mode=OneWay}" />
+                </Grid>
+            </Border>
+
+            <!-- 标题 + 艺术家 -->
+            <StackPanel
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                Spacing="3">
+                <TextBlock
+                    x:Name="Title"
+                    FontSize="12"
+                    Foreground="#D9FFFFFF"
+                    MaxLines="1"
+                    Text="{x:Bind ViewModel.Title, Mode=OneWay}"
+                    TextTrimming="CharacterEllipsis" />
+                <TextBlock
+                    x:Name="Artist"
+                    Height="0"
+                    FontSize="13"
+                    Foreground="#99FFFFFF"
+                    MaxLines="1"
+                    Opacity="0"
+                    Text="{x:Bind ViewModel.Artist, Mode=OneWay}"
+                    TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+
+            <!-- 跳动的音频条（紧凑态可见） -->
+            <StackPanel
+                x:Name="Bars"
+                Grid.Column="2"
+                VerticalAlignment="Center"
+                Orientation="Horizontal"
+                Spacing="2">
+                <Rectangle
+                    x:Name="Bar1"
+                    Width="3"
+                    Height="8"
+                    VerticalAlignment="Center"
+                    Fill="#FF6CCB5F"
+                    RadiusX="1.5"
+                    RadiusY="1.5" />
+                <Rectangle
+                    x:Name="Bar2"
+                    Width="3"
+                    Height="14"
+                    VerticalAlignment="Center"
+                    Fill="#FF6CCB5F"
+                    RadiusX="1.5"
+                    RadiusY="1.5" />
+                <Rectangle
+                    x:Name="Bar3"
+                    Width="3"
+                    Height="10"
+                    VerticalAlignment="Center"
+                    Fill="#FF6CCB5F"
+                    RadiusX="1.5"
+                    RadiusY="1.5" />
+            </StackPanel>
+        </Grid>
+
+        <!-- 播控（展开态可见） -->
+        <StackPanel
+            x:Name="Controls"
+            Grid.Row="1"
+            Height="0"
+            HorizontalAlignment="Center"
+            Orientation="Horizontal"
+            Opacity="0"
+            Spacing="18">
+            <Button Click="Previous_Click" Style="{StaticResource TransportButtonStyle}">
+                <FontIcon FontSize="16" Glyph="&#xE892;" />
+            </Button>
+            <Button Click="PlayPause_Click" Style="{StaticResource TransportButtonStyle}">
+                <FontIcon FontSize="20" Glyph="{x:Bind ViewModel.PlayPauseGlyph, Mode=OneWay}" />
+            </Button>
+            <Button Click="Next_Click" Style="{StaticResource TransportButtonStyle}">
+                <FontIcon FontSize="16" Glyph="&#xE893;" />
+            </Button>
+        </StackPanel>
+    </Grid>
+</UserControl>
