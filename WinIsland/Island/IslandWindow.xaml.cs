@@ -146,7 +146,7 @@ public sealed partial class IslandWindow : Window
         }
 
         ContentHost.Content = content;
-        AnimateIslandSize(size, CollapseDuration);
+        AnimateIslandSize(size, CollapseDuration, isTemporary: true);
         SetCornerRadius(Math.Min(28, size.Height / 2));
         UpdateVisibility();
     }
@@ -467,9 +467,9 @@ public sealed partial class IslandWindow : Window
         IslandRoot.CornerRadius = new CornerRadius(radius);
     }
 
-    private void AnimateIslandSize(Size islandTarget, TimeSpan duration)
+    private void AnimateIslandSize(Size islandTarget, TimeSpan duration, bool isTemporary = false)
     {
-        var totalTarget = ComputeTotalSize();
+        var totalTarget = isTemporary ? islandTarget : ComputeTotalSize();
 
         if (islandTarget == _currentIsland && _sizeStoryboard == null)
         {
