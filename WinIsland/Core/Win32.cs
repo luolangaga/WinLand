@@ -205,4 +205,35 @@ internal static partial class Win32
 
     /// <summary>安装样式守卫，永久阻止任何代码给窗口加回边框样式。</summary>
     public static void InstallStyleGuard(nint hwnd) => SetWindowSubclass(hwnd, _styleGuardProc, 0x15AD, 0);
+
+    [ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IApplicationActivationManager
+    {
+        nint ActivateApplication(string appUserModelId, string? args, uint options, out uint processId);
+        nint ActivateForFile(string appUserModelId, nint itemArray, string verb, out uint processId);
+        nint ActivateForProtocol(string appUserModelId, nint itemArray, out uint processId);
+    }
+
+    [ComImport, Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")]
+    internal class ApplicationActivationManager { }
+
+    public static uint ActivateApp(string appUserModelId)
+    {
+        var mgr = (IApplicationActivationManager)new ApplicationActivationManager();
+        mgr.ActivateApplication(appUserModelId, null, 0, out uint pid);
+        return pid;
+    }
+
+    [LibraryImport("shell32.dll", EntryPoint = "ExtractIconExW", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial uint ExtractIconEx(string szFileName, int nIconIndex, nint[]? phiconLarge, nint[]? phiconSmall, uint nIcons);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool DestroyIcon(nint hIcon);
+
+    [LibraryImport("user32.dll")]
+    public static partial nint CopyImage(nint h, uint type, int cx, int cy, uint flags);
+
+    public const uint IMAGE_BITMAP = 0;
+    public const uint LR_COPYRETURNORG = 0x00000004;
 }

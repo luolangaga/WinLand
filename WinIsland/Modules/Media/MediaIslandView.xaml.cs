@@ -21,6 +21,7 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
 
     private readonly AudioLevelMonitor? _levelMonitor;
     private readonly DispatcherQueueTimer _glowTimer;
+    private readonly DispatcherQueueTimer _progressTimer;
     private float _uiBass, _uiMid, _uiTreble;
 
     internal MediaViewModel ViewModel { get; }
@@ -35,7 +36,7 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
 
         BuildBarsAnimation();
         Loaded += (_, _) => SyncBars();
-        Unloaded += (_, _) => { StopBars(); _glowTimer?.Stop(); };
+        Unloaded += (_, _) => { StopBars(); _glowTimer?.Stop(); _progressTimer?.Stop(); };
         ViewModel.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(MediaViewModel.IsPlaying)) SyncBars();
@@ -46,6 +47,18 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
         _glowTimer = DispatcherQueue.CreateTimer();
         _glowTimer.Interval = TimeSpan.FromMilliseconds(16);
         _glowTimer.Tick += (_, _) => OnGlowTick();
+
+        _progressTimer = DispatcherQueue.CreateTimer();
+        _progressTimer.Interval = TimeSpan.FromMilliseconds(250);
+        _progressTimer.Tick += (_, _) => SyncProgressTimer();
+    }
+
+    private void SyncProgressTimer()
+    {
+        if (_isExpanded && ViewModel.IsPlaying && ViewModel.HasProgress)
+        {
+            ViewModel.RefreshTimeline?.Invoke();
+        }
     }
 
     public void AnimateToExpanded(TimeSpan duration)
@@ -60,7 +73,7 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
         var midTime = TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.5);
 
         sb.Children.Add(DiscreteKeyFrameAnim(RootGrid, "Padding",
-            new Thickness(20, 16, 20, 12), midTime));
+            new Thickness(16, 10, 16, 8), midTime));
         sb.Children.Add(Anim(MainGrid, "ColumnSpacing", currentSpacing, 14, duration, easing));
         sb.Children.Add(DiscreteKeyFrameAnim(Cover, "CornerRadius",
             new CornerRadius(14), midTime));
@@ -73,23 +86,37 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
         sb.Children.Add(Anim(Title, "FontSize", 12, 15, duration, easing));
 
         var halfDur = TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.4);
-        sb.Children.Add(Anim(Artist, "Height", 0, 20, halfDur,
+        sb.Children.Add(Anim(Artist, "Height", 0, 18, halfDur,
             new CubicEase { EasingMode = EasingMode.EaseOut },
             beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.2)));
         sb.Children.Add(Anim(Artist, "Opacity", 0, 1, halfDur,
             new CubicEase { EasingMode = EasingMode.EaseOut },
             beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.2)));
 
+        sb.Children.Add(Anim(SourceAppRow, "Height", 0, 14, halfDur,
+            new CubicEase { EasingMode = EasingMode.EaseOut },
+            beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3)));
+        sb.Children.Add(Anim(SourceAppRow, "Opacity", 0, 1, halfDur,
+            new CubicEase { EasingMode = EasingMode.EaseOut },
+            beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3)));
+
         sb.Children.Add(Anim(Bars, "Opacity", 1, 0,
             TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3),
             new CubicEase { EasingMode = EasingMode.EaseIn }));
 
-        sb.Children.Add(Anim(Controls, "Height", 0, 48, halfDur,
+        sb.Children.Add(Anim(ControlsRow, "Height", 0, 40, halfDur,
             new CubicEase { EasingMode = EasingMode.EaseOut },
             beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3)));
-        sb.Children.Add(Anim(Controls, "Opacity", 0, 1, halfDur,
+        sb.Children.Add(Anim(ControlsRow, "Opacity", 0, 1, halfDur,
             new CubicEase { EasingMode = EasingMode.EaseOut },
             beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3)));
+
+        sb.Children.Add(Anim(ProgressRow, "Height", 0, 14, halfDur,
+            new CubicEase { EasingMode = EasingMode.EaseOut },
+            beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.4)));
+        sb.Children.Add(Anim(ProgressRow, "Opacity", 0, 1, halfDur,
+            new CubicEase { EasingMode = EasingMode.EaseOut },
+            beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.4)));
 
         if (ViewModel.GlowEnabled)
         {
@@ -106,6 +133,7 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
             if (ViewModel.GlowEnabled)
                 GlowLayer.Opacity = 1;
             SyncGlow();
+            SyncProgressTimerActive();
         };
 
         _morphStoryboard = sb;
@@ -135,14 +163,24 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
         sb.Children.Add(Anim(Title, "FontSize", Title.FontSize > 0 ? Title.FontSize : 15, 12, duration, easing));
 
         var thirdDur = TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3);
-        sb.Children.Add(Anim(Artist, "Height", Artist.ActualHeight > 0 ? Artist.ActualHeight : 20, 0, thirdDur,
+        sb.Children.Add(Anim(Artist, "Height", Artist.ActualHeight > 0 ? Artist.ActualHeight : 18, 0, thirdDur,
             new CubicEase { EasingMode = EasingMode.EaseIn }));
         sb.Children.Add(Anim(Artist, "Opacity", Artist.Opacity > 0 ? Artist.Opacity : 1, 0, thirdDur,
             new CubicEase { EasingMode = EasingMode.EaseIn }));
 
-        sb.Children.Add(Anim(Controls, "Height", Controls.ActualHeight > 0 ? Controls.ActualHeight : 48, 0, thirdDur,
+        sb.Children.Add(Anim(SourceAppRow, "Height", SourceAppRow.ActualHeight > 0 ? SourceAppRow.ActualHeight : 14, 0, thirdDur,
             new CubicEase { EasingMode = EasingMode.EaseIn }));
-        sb.Children.Add(Anim(Controls, "Opacity", Controls.Opacity > 0 ? Controls.Opacity : 1, 0, thirdDur,
+        sb.Children.Add(Anim(SourceAppRow, "Opacity", SourceAppRow.Opacity > 0 ? SourceAppRow.Opacity : 1, 0, thirdDur,
+            new CubicEase { EasingMode = EasingMode.EaseIn }));
+
+        sb.Children.Add(Anim(ControlsRow, "Height", ControlsRow.ActualHeight > 0 ? ControlsRow.ActualHeight : 40, 0, thirdDur,
+            new CubicEase { EasingMode = EasingMode.EaseIn }));
+        sb.Children.Add(Anim(ControlsRow, "Opacity", ControlsRow.Opacity > 0 ? ControlsRow.Opacity : 1, 0, thirdDur,
+            new CubicEase { EasingMode = EasingMode.EaseIn }));
+
+        sb.Children.Add(Anim(ProgressRow, "Height", ProgressRow.ActualHeight > 0 ? ProgressRow.ActualHeight : 14, 0, thirdDur,
+            new CubicEase { EasingMode = EasingMode.EaseIn }));
+        sb.Children.Add(Anim(ProgressRow, "Opacity", ProgressRow.Opacity > 0 ? ProgressRow.Opacity : 1, 0, thirdDur,
             new CubicEase { EasingMode = EasingMode.EaseIn }));
 
         var twoThirdDur = TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.5);
@@ -161,6 +199,7 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
             Title.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
                 Windows.UI.Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF));
             SyncBars();
+            _progressTimer.Stop();
         };
 
         _morphStoryboard = sb;
@@ -320,4 +359,14 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
     private void Previous_Click(object sender, RoutedEventArgs e) => ViewModel.SkipPrevious?.Invoke();
     private void PlayPause_Click(object sender, RoutedEventArgs e) => ViewModel.TogglePlayPause?.Invoke();
     private void Next_Click(object sender, RoutedEventArgs e) => ViewModel.SkipNext?.Invoke();
+    private void PrevSession_Click(object sender, RoutedEventArgs e) => ViewModel.SwitchToPrevSession?.Invoke();
+    private void NextSession_Click(object sender, RoutedEventArgs e) => ViewModel.SwitchToNextSession?.Invoke();
+
+    private void SyncProgressTimerActive()
+    {
+        if (_isExpanded && ViewModel.IsPlaying && ViewModel.HasProgress)
+            _progressTimer.Start();
+        else
+            _progressTimer.Stop();
+    }
 }

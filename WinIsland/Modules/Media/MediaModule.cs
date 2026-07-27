@@ -1,14 +1,12 @@
 using Microsoft.UI.Xaml.Media.Imaging;
+using Windows.ApplicationModel;
+using Windows.Management.Deployment;
 using Windows.Media.Control;
+using Windows.Storage.Streams;
 using WinIsland.Core;
 
 namespace WinIsland.Modules.Media;
 
-/// <summary>
-/// 正在播放模块：通过 GlobalSystemMediaTransportControls (GSMTC)
-/// 监听系统媒体会话，把正在播放的音乐常驻显示在灵动岛上。
-/// 只提供内容（IslandLiveContent），尺寸/悬浮/展开全部由主程序处理。
-/// </summary>
 public sealed class MediaModule : IIslandModule
 {
     public string Id => "media";
@@ -17,6 +15,7 @@ public sealed class MediaModule : IIslandModule
     private IDynamicIslandApi _api = null!;
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private GlobalSystemMediaTransportControlsSession? _session;
+    private readonly List<GlobalSystemMediaTransportControlsSession> _sessions = new();
 
     private MediaViewModel _vm = null!;
     private IslandLiveContent _content = null!;
@@ -25,8 +24,8 @@ public sealed class MediaModule : IIslandModule
     private bool _liveShown;
     private int _refreshVersion;
     private string? _thumbTrackKey;
+    private string? _lastSourceAppId;
 
-    /// <summary>当前播放状态描述（供设置页展示）。</summary>
     public string StatusText { get; private set; } = "当前没有活动的媒体会话";
 
     public async Task InitializeAsync(IDynamicIslandApi api)
@@ -39,6 +38,9 @@ public sealed class MediaModule : IIslandModule
             TogglePlayPause = () => _ = _session?.TryTogglePlayPauseAsync(),
             SkipNext = () => _ = _session?.TrySkipNextAsync(),
             SkipPrevious = () => _ = _session?.TrySkipPreviousAsync(),
+            SwitchToNextSession = SwitchToNextSession,
+            SwitchToPrevSession = SwitchToPrevSession,
+            RefreshTimeline = RefreshTimeline,
             GlowEnabled = api.Settings.Get("media.glow", true),
         };
 
@@ -52,7 +54,8 @@ public sealed class MediaModule : IIslandModule
             OwnerAccent = Windows.UI.Color.FromArgb(255, 255, 45, 85),
             MorphView = new MediaIslandView(_vm, _levelMonitor),
             CompactSize = new Windows.Foundation.Size(250, 40),
-            ExpandedSize = new Windows.Foundation.Size(420, 158),
+            ExpandedSize = new Windows.Foundation.Size(420, 148),
+            OnTap = ActivateSourceApp,
         };
 
         api.AddSettingsPage(new SettingsPageDescriptor(
@@ -75,8 +78,10 @@ public sealed class MediaModule : IIslandModule
         try
         {
             _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
-            _manager.CurrentSessionChanged += (_, _) => RunOnUI(AttachCurrentSession);
-            AttachCurrentSession();
+            _manager.CurrentSessionChanged += (_, _) => RunOnUI(OnCurrentSessionChanged);
+            _manager.SessionsChanged += (_, _) => RunOnUI(OnSessionsChanged);
+            OnSessionsChanged();
+            OnCurrentSessionChanged();
         }
         catch
         {
@@ -106,7 +111,22 @@ public sealed class MediaModule : IIslandModule
         }
     }
 
-    private void AttachCurrentSession()
+    private void OnSessionsChanged()
+    {
+        _sessions.Clear();
+        try
+        {
+            foreach (var s in _manager?.GetSessions() ?? Array.Empty<GlobalSystemMediaTransportControlsSession>())
+                _sessions.Add(s);
+        }
+        catch { }
+
+        _vm.HasMultipleSessions = _sessions.Count > 1;
+        _vm.SessionCount = _sessions.Count;
+        UpdateSessionIndex();
+    }
+
+    private void OnCurrentSessionChanged()
     {
         var session = _manager?.GetCurrentSession();
         if (ReferenceEquals(session, _session) && session != null) return;
@@ -117,7 +137,53 @@ public sealed class MediaModule : IIslandModule
         {
             _session.MediaPropertiesChanged += OnMediaPropertiesChanged;
             _session.PlaybackInfoChanged += OnPlaybackInfoChanged;
+            _session.TimelinePropertiesChanged += OnTimelinePropertiesChanged;
         }
+        UpdateSessionIndex();
+        _ = RefreshAsync();
+    }
+
+    private void UpdateSessionIndex()
+    {
+        if (_session != null)
+        {
+            int idx = _sessions.IndexOf(_session);
+            _vm.SessionIndex = idx >= 0 ? idx : 0;
+        }
+    }
+
+    private void SwitchToNextSession()
+    {
+        if (_sessions.Count <= 1) return;
+        int idx = _vm.SessionIndex;
+        int next = (idx + 1) % _sessions.Count;
+        RunOnUI(() => SwitchToSession(next));
+    }
+
+    private void SwitchToPrevSession()
+    {
+        if (_sessions.Count <= 1) return;
+        int idx = _vm.SessionIndex;
+        int prev = (idx - 1 + _sessions.Count) % _sessions.Count;
+        RunOnUI(() => SwitchToSession(prev));
+    }
+
+    private void SwitchToSession(int index)
+    {
+        if (index < 0 || index >= _sessions.Count) return;
+        var target = _sessions[index];
+        if (ReferenceEquals(target, _session)) return;
+
+        DetachSession();
+        _session = target;
+        if (_session != null)
+        {
+            _session.MediaPropertiesChanged += OnMediaPropertiesChanged;
+            _session.PlaybackInfoChanged += OnPlaybackInfoChanged;
+            _session.TimelinePropertiesChanged += OnTimelinePropertiesChanged;
+        }
+        _vm.SessionIndex = index;
+        _lastSourceAppId = null;
         _ = RefreshAsync();
     }
 
@@ -128,6 +194,7 @@ public sealed class MediaModule : IIslandModule
         {
             _session.MediaPropertiesChanged -= OnMediaPropertiesChanged;
             _session.PlaybackInfoChanged -= OnPlaybackInfoChanged;
+            _session.TimelinePropertiesChanged -= OnTimelinePropertiesChanged;
         }
         catch { }
         _session = null;
@@ -138,6 +205,26 @@ public sealed class MediaModule : IIslandModule
 
     private void OnPlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender, object args)
         => RunOnUI(RefreshPlaybackOnly);
+
+    private void OnTimelinePropertiesChanged(GlobalSystemMediaTransportControlsSession sender, object args)
+        => RunOnUI(RefreshTimeline);
+
+    private void RefreshTimeline()
+    {
+        var session = _session;
+        if (session == null || !_enabled) return;
+        try
+        {
+            var timeline = session.GetTimelineProperties();
+            _vm.Position = timeline.Position;
+            _vm.Duration = timeline.EndTime - timeline.StartTime;
+            _vm.HasProgress = _vm.Duration > TimeSpan.Zero;
+        }
+        catch
+        {
+            _vm.HasProgress = false;
+        }
+    }
 
     private void RefreshPlaybackOnly()
     {
@@ -163,6 +250,7 @@ public sealed class MediaModule : IIslandModule
             _vm.IsPlaying = status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
             UpdateLevelMonitor();
             StatusText = $"{(_vm.IsPlaying ? "正在播放" : "已暂停")}：{_vm.Title} - {_vm.Artist}（来自 {session.SourceAppUserModelId}）";
+            RefreshTimeline();
         }
         catch
         {
@@ -205,6 +293,14 @@ public sealed class MediaModule : IIslandModule
             UpdateLevelMonitor();
             StatusText = $"{(_vm.IsPlaying ? "正在播放" : "已暂停")}：{_vm.Title} - {_vm.Artist}（来自 {session.SourceAppUserModelId}）";
 
+            var sourceAppId = session.SourceAppUserModelId;
+            if (sourceAppId != _lastSourceAppId)
+            {
+                _lastSourceAppId = sourceAppId;
+                _ = LoadSourceAppInfoAsync(sourceAppId);
+            }
+
+            RefreshTimeline();
             SetLive(true);
 
             var trackKey = $"{_vm.Title}\n{_vm.Artist}";
@@ -249,6 +345,130 @@ public sealed class MediaModule : IIslandModule
         if (show == _liveShown) return;
         _liveShown = show;
         _api.SetLiveContent(Id, show ? _content : null);
+    }
+
+    private void ActivateSourceApp()
+    {
+        var appId = _session?.SourceAppUserModelId;
+        if (string.IsNullOrEmpty(appId)) return;
+        try
+        {
+            Win32.ActivateApp(appId);
+        }
+        catch
+        {
+            try
+            {
+                var exePart = appId.Contains('!') ? appId.Split('!')[0] : appId;
+                if (exePart.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = exePart,
+                        UseShellExecute = true,
+                    });
+                }
+            }
+            catch { }
+        }
+    }
+
+    private async Task LoadSourceAppInfoAsync(string? sourceAppUserModelId)
+    {
+        if (string.IsNullOrEmpty(sourceAppUserModelId))
+        {
+            _vm.SourceAppName = "";
+            _vm.SourceAppIcon = null;
+            return;
+        }
+
+        try
+        {
+            var familyName = sourceAppUserModelId.Split('!')[0];
+            var mgr = new PackageManager();
+            var pkgs = mgr.FindPackagesForUser("");
+            foreach (var pkg in pkgs)
+            {
+                if (pkg.Id.FamilyName != familyName) continue;
+                var displayName = pkg.DisplayName;
+                if (string.IsNullOrEmpty(displayName))
+                    displayName = LookupKnownApp(PrettifyAumid(sourceAppUserModelId));
+                _vm.SourceAppName = displayName;
+                try
+                {
+                    var file = await Windows.Storage.StorageFile.GetFileFromApplicationUriAsync(pkg.Logo);
+                    using var stream = await file.OpenReadAsync();
+                    var bmp = new BitmapImage();
+                    await bmp.SetSourceAsync(stream);
+                    _vm.SourceAppIcon = bmp;
+                }
+                catch { }
+                return;
+            }
+        }
+        catch { }
+
+        var exeName = sourceAppUserModelId;
+        if (exeName.Contains('!')) exeName = exeName.Split('!')[0];
+        if (exeName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            exeName = System.IO.Path.GetFileNameWithoutExtension(exeName);
+        }
+        else
+        {
+            exeName = PrettifyAumid(sourceAppUserModelId);
+        }
+
+        _vm.SourceAppName = exeName;
+        _vm.SourceAppIcon = null;
+    }
+
+    private static string PrettifyAumid(string aumid)
+    {
+        var parts = aumid.Split('!');
+        var familyPart = parts[0];
+        var appId = parts.Length > 1 ? parts[1] : null;
+
+        if (!string.IsNullOrEmpty(appId) && !appId.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            var dotIdx = appId.LastIndexOf('.');
+            var nice = dotIdx >= 0 ? appId[(dotIdx + 1)..] : appId;
+            if (!string.IsNullOrWhiteSpace(nice))
+                return LookupKnownApp(nice);
+        }
+
+        var segments = familyPart.Split('_');
+        string name = segments[0];
+        var lastDot = name.LastIndexOf('.');
+        if (lastDot >= 0)
+            name = name[(lastDot + 1)..];
+
+        return LookupKnownApp(name);
+    }
+
+    private static string LookupKnownApp(string name)
+    {
+        if (name.Equals("Spotify", StringComparison.OrdinalIgnoreCase) || name.Contains("SpotifyMusic", StringComparison.OrdinalIgnoreCase))
+            return "Spotify";
+        if (name.Equals("AppleMusic", StringComparison.OrdinalIgnoreCase) || name.Equals("Music", StringComparison.OrdinalIgnoreCase))
+            return "Apple Music";
+        if (name.Contains("QQMusic", StringComparison.OrdinalIgnoreCase))
+            return "QQ音乐";
+        if (name.Contains("NeteaseMusic", StringComparison.OrdinalIgnoreCase) || name.Contains("CloudMusic", StringComparison.OrdinalIgnoreCase))
+            return "网易云音乐";
+        if (name.Contains("Kugou", StringComparison.OrdinalIgnoreCase))
+            return "酷狗音乐";
+        if (name.Contains("Kuwo", StringComparison.OrdinalIgnoreCase))
+            return "酷我音乐";
+        if (name.Contains("Bilibili", StringComparison.OrdinalIgnoreCase))
+            return "哔哩哔哩";
+        if (name.Contains("YouTube", StringComparison.OrdinalIgnoreCase) || name.Equals("YouTubeMusic", StringComparison.OrdinalIgnoreCase))
+            return "YouTube";
+        if (name.Contains("VLC", StringComparison.OrdinalIgnoreCase))
+            return "VLC";
+        if (name.Contains("Foobar", StringComparison.OrdinalIgnoreCase))
+            return "foobar2000";
+        return name;
     }
 
     private void UpdateLevelMonitor()

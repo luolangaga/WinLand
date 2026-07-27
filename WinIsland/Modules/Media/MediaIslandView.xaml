@@ -23,6 +23,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- 节奏光晕层（展开态播放时随实时音频频段能量脉动） -->
@@ -101,11 +102,11 @@
                 </Grid>
             </Border>
 
-            <!-- 标题 + 艺术家 -->
+            <!-- 标题 + 艺术家 + 来源应用 -->
             <StackPanel
                 Grid.Column="1"
                 VerticalAlignment="Center"
-                Spacing="3">
+                Spacing="2">
                 <TextBlock
                     x:Name="Title"
                     FontSize="12"
@@ -122,6 +123,29 @@
                     Opacity="0"
                     Text="{x:Bind ViewModel.Artist, Mode=OneWay}"
                     TextTrimming="CharacterEllipsis" />
+                <StackPanel
+                    x:Name="SourceAppRow"
+                    Height="0"
+                    Opacity="0"
+                    Orientation="Horizontal"
+                    Spacing="4"
+                    VerticalAlignment="Center">
+                    <Image
+                        x:Name="SourceAppIconImg"
+                        Width="12"
+                        Height="12"
+                        VerticalAlignment="Center"
+                        Source="{x:Bind ViewModel.SourceAppIcon, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.SourceAppIconVisibility, Mode=OneWay}" />
+                    <TextBlock
+                        x:Name="SourceAppText"
+                        FontSize="10"
+                        Foreground="#80FFFFFF"
+                        MaxLines="1"
+                        Text="{x:Bind ViewModel.SourceAppName, Mode=OneWay}"
+                        TextTrimming="CharacterEllipsis"
+                        VerticalAlignment="Center" />
+                </StackPanel>
             </StackPanel>
 
             <!-- 跳动的音频条（紧凑态可见） -->
@@ -158,24 +182,86 @@
             </StackPanel>
         </Grid>
 
-        <!-- 播控（展开态可见） -->
-        <StackPanel
-            x:Name="Controls"
-            Grid.Row="1"
+        <!-- 播控（展开态可见）+ 会话切换 -->
+        <Grid x:Name="ControlsRow" Grid.Row="1" Height="0" Opacity="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Button
+                x:Name="PrevSessionBtn"
+                Grid.Column="0"
+                Click="PrevSession_Click"
+                Style="{StaticResource TransportButtonStyle}"
+                Padding="6"
+                Visibility="{x:Bind ViewModel.SwitcherVisibility, Mode=OneWay}">
+                <FontIcon FontSize="12" Glyph="&#xE76B;" />
+            </Button>
+            <StackPanel
+                x:Name="Controls"
+                Grid.Column="1"
+                HorizontalAlignment="Center"
+                Orientation="Horizontal"
+                Spacing="18">
+                <Button Click="Previous_Click" Style="{StaticResource TransportButtonStyle}">
+                    <FontIcon FontSize="16" Glyph="&#xE892;" />
+                </Button>
+                <Button Click="PlayPause_Click" Style="{StaticResource TransportButtonStyle}">
+                    <FontIcon FontSize="20" Glyph="{x:Bind ViewModel.PlayPauseGlyph, Mode=OneWay}" />
+                </Button>
+                <Button Click="Next_Click" Style="{StaticResource TransportButtonStyle}">
+                    <FontIcon FontSize="16" Glyph="&#xE893;" />
+                </Button>
+            </StackPanel>
+            <Button
+                x:Name="NextSessionBtn"
+                Grid.Column="2"
+                Click="NextSession_Click"
+                Style="{StaticResource TransportButtonStyle}"
+                Padding="6"
+                Visibility="{x:Bind ViewModel.SwitcherVisibility, Mode=OneWay}">
+                <FontIcon FontSize="12" Glyph="&#xE76C;" />
+            </Button>
+        </Grid>
+
+        <!-- 进度条（展开态可见，媒体支持时才显示） -->
+        <Grid
+            x:Name="ProgressRow"
+            Grid.Row="2"
             Height="0"
-            HorizontalAlignment="Center"
-            Orientation="Horizontal"
             Opacity="0"
-            Spacing="18">
-            <Button Click="Previous_Click" Style="{StaticResource TransportButtonStyle}">
-                <FontIcon FontSize="16" Glyph="&#xE892;" />
-            </Button>
-            <Button Click="PlayPause_Click" Style="{StaticResource TransportButtonStyle}">
-                <FontIcon FontSize="20" Glyph="{x:Bind ViewModel.PlayPauseGlyph, Mode=OneWay}" />
-            </Button>
-            <Button Click="Next_Click" Style="{StaticResource TransportButtonStyle}">
-                <FontIcon FontSize="16" Glyph="&#xE893;" />
-            </Button>
-        </StackPanel>
+            ColumnSpacing="6"
+            VerticalAlignment="Center"
+            Visibility="{x:Bind ViewModel.ProgressVisibility, Mode=OneWay}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock
+                x:Name="PositionText"
+                Grid.Column="0"
+                FontSize="10"
+                Foreground="#80FFFFFF"
+                VerticalAlignment="Center"
+                Text="{x:Bind ViewModel.PositionText, Mode=OneWay}" />
+            <ProgressBar
+                x:Name="ProgressBar"
+                Grid.Column="1"
+                Minimum="0"
+                Maximum="1"
+                Value="{x:Bind ViewModel.Progress, Mode=OneWay}"
+                VerticalAlignment="Center"
+                ShowError="False"
+                ShowPaused="False" />
+            <TextBlock
+                x:Name="DurationText"
+                Grid.Column="2"
+                FontSize="10"
+                Foreground="#80FFFFFF"
+                VerticalAlignment="Center"
+                Text="{x:Bind ViewModel.DurationText, Mode=OneWay}" />
+        </Grid>
     </Grid>
 </UserControl>

@@ -4,7 +4,6 @@ using WinIsland.Island;
 using WinIsland.Modules;
 using WinIsland.Modules.Media;
 using WinIsland.Modules.Messaging;
-using WinIsland.Modules.AcpMonitor;
 using WinIsland.Modules.Battery;
 using WinIsland.Settings;
 
@@ -16,7 +15,6 @@ public partial class App : Application
     private IslandWindow _island = null!;
     private IslandService _service = null!;
     private PluginLoader _pluginLoader = null!;
-    private CallbackServer _callbacks = null!;
     private TrayIcon? _tray;
     internal SettingsWindow? _settingsWindow;
     private bool _exiting;
@@ -30,19 +28,12 @@ public partial class App : Application
     {
         _settings = new SettingsService();
         _island = new IslandWindow(_settings);
-        _callbacks = new CallbackServer();
-        _service = new IslandService(_island, _settings, _callbacks);
+        _service = new IslandService(_island, _settings);
         _service.SettingsOpenRequested += OpenSettingsWindow;
 
         _pluginLoader = new PluginLoader(_service, _settings);
 
         _island.ShowIsland();
-
-        _ = Task.Run(async () =>
-        {
-            try { await _callbacks.StartAsync(); }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"CallbackServer failed: {ex}"); }
-        });
 
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
         _tray = new TrayIcon("WinIsland - 灵动岛", iconPath)
@@ -54,7 +45,6 @@ public partial class App : Application
         _pluginLoader.RegisterBuiltIn(new GeneralModule());
         _pluginLoader.RegisterBuiltIn(new MediaModule());
         _pluginLoader.RegisterBuiltIn(new MessageModule());
-        _pluginLoader.RegisterBuiltIn(new AcpMonitorModule());
         _pluginLoader.RegisterBuiltIn(new BatteryModule());
 
         await _pluginLoader.LoadBuiltInModulesAsync();
@@ -106,7 +96,6 @@ public partial class App : Application
         _tray?.Dispose();
         await _pluginLoader.ShutdownAllAsync();
         _pluginLoader.Dispose();
-        await _callbacks.DisposeAsync();
         _settingsWindow?.Close();
         _island.Close();
         Environment.Exit(0);

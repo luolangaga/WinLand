@@ -649,6 +649,12 @@ public sealed partial class IslandWindow : Window
         if (_tempContent != null && e.OriginalSource is not Microsoft.UI.Xaml.Controls.Primitives.ButtonBase)
         {
             DismissTemporary();
+            return;
+        }
+
+        if (e.OriginalSource is not Microsoft.UI.Xaml.Controls.Primitives.ButtonBase)
+        {
+            ActiveLive?.OnTap?.Invoke();
         }
     }
 
