@@ -37,23 +37,17 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
     {
         _morphStoryboard?.Stop();
 
-        // 标题字重/颜色在视觉上不引起布局跳动，可立即切换
-        Title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+         // 立即设置非动画属性
+    RootGrid.Padding = new Thickness(20, 16, 20, 12);
+    MainGrid.ColumnSpacing = 14;
+    Cover.CornerRadius = new CornerRadius(14);
+    
+    Title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
         Title.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White);
         StopBars();
 
         var sb = new Storyboard();
         var easing = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.45 };
-        var padEase = new CubicEase { EasingMode = EasingMode.EaseOut };
-
-        // Padding / ColumnSpacing / CornerRadius 必须随尺寸动画一起过渡，
-        // 否则第 0 帧立即变更会让内容相对还在生长的岛体瞬间错位闪动。
-        sb.Children.Add(Anim(RootGrid, "(Grid.Padding).Left", 8, 20, duration, padEase));
-        sb.Children.Add(Anim(RootGrid, "(Grid.Padding).Top", 0, 16, duration, padEase));
-        sb.Children.Add(Anim(RootGrid, "(Grid.Padding).Right", 14, 20, duration, padEase));
-        sb.Children.Add(Anim(RootGrid, "(Grid.Padding).Bottom", 0, 12, duration, padEase));
-        sb.Children.Add(Anim(MainGrid, "ColumnSpacing", 10, 14, duration, padEase));
-        sb.Children.Add(Anim(Cover, "CornerRadius", 7, 14, duration, padEase));
 
         // 封面放大
         sb.Children.Add(Anim(Cover, "Width", 26, 72, duration, easing));
