@@ -8,32 +8,15 @@ WinIsland 支持动态加载外部 DLL 插件。主程序负责窗口管理（�
 
 ```powershell
 dotnet new classlib -n MyIslandPlugin -o MyIslandPlugin
+cd MyIslandPlugin
+dotnet add package luolan.winland.Core
 ```
 
-编辑 `MyIslandPlugin.csproj`：
-
-```xml
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
-    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
-    <UseWinUI>true</UseWinUI>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <WindowsPackageType>None</WindowsPackageType>
-    <EnableMsixTooling>false</EnableMsixTooling>
-  </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2526" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
-    <!-- 引用 WinIsland.Core SDK DLL -->
-    <Reference Include="WinIsland.Core">
-      <HintPath>..\path\to\WinIsland.Core.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-  </ItemGroup>
-</Project>
-```
+> 如果包尚未发布到 nuget.org，先用本地源安装：
+> ```powershell
+> dotnet nuget add source "C:\path\to\nupkg-folder" -n LocalWinIsland
+> dotnet add package luolan.winland.Core -s LocalWinIsland
+> ```
 
 ### 2. 实现插件
 
@@ -116,7 +99,6 @@ dotnet build -c Release
 ```
 WinIsland/
   WinIsland.exe
-  WinIsland.Core.dll
   plugins/
     MyIslandPlugin.dll    ← 放这里
 ```

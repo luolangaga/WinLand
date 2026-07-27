@@ -25,6 +25,49 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
+        <!-- 节奏光晕层（展开态播放时随实时音频频段能量脉动） -->
+        <Grid x:Name="GlowLayer" Grid.RowSpan="2" Opacity="0" IsHitTestVisible="False">
+            <!-- 低频光晕：深紫蓝，鼓点 punch — 大范围扩散 -->
+            <Ellipse x:Name="Glow1" RenderTransformOrigin="0.3,0.5" Opacity="0.40">
+                <Ellipse.RenderTransform>
+                    <ScaleTransform x:Name="Glow1Scale" ScaleX="0.50" ScaleY="0.50" />
+                </Ellipse.RenderTransform>
+                <Ellipse.Fill>
+                    <RadialGradientBrush>
+                        <GradientStop Color="#C06366F1" Offset="0" />
+                        <GradientStop Color="#406366F1" Offset="0.3" />
+                        <GradientStop Color="#006366F1" Offset="0.75" />
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+            <!-- 中频光晕：青绿 — 中等扩散 -->
+            <Ellipse x:Name="Glow2" RenderTransformOrigin="0.7,0.4" Opacity="0.35">
+                <Ellipse.RenderTransform>
+                    <ScaleTransform x:Name="Glow2Scale" ScaleX="0.45" ScaleY="0.45" />
+                </Ellipse.RenderTransform>
+                <Ellipse.Fill>
+                    <RadialGradientBrush>
+                        <GradientStop Color="#B014B8A6" Offset="0" />
+                        <GradientStop Color="#3014B8A6" Offset="0.3" />
+                        <GradientStop Color="#0014B8A6" Offset="0.7" />
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+            <!-- 高频光晕：暖粉 — 小范围闪烁 -->
+            <Ellipse x:Name="Glow3" RenderTransformOrigin="0.5,0.7" Opacity="0.30">
+                <Ellipse.RenderTransform>
+                    <ScaleTransform x:Name="Glow3Scale" ScaleX="0.40" ScaleY="0.40" />
+                </Ellipse.RenderTransform>
+                <Ellipse.Fill>
+                    <RadialGradientBrush>
+                        <GradientStop Color="#A0F472B0" Offset="0" />
+                        <GradientStop Color="#30F472B0" Offset="0.3" />
+                        <GradientStop Color="#00F472B0" Offset="0.65" />
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+        </Grid>
+
         <!-- 主行：封面 + 标题/艺术家 + 音频条 -->
         <Grid x:Name="MainGrid" Grid.Row="0" ColumnSpacing="10">
             <Grid.ColumnDefinitions>

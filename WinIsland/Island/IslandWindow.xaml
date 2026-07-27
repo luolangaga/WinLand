@@ -19,8 +19,13 @@
             PointerEntered="IslandRoot_PointerEntered"
             PointerExited="IslandRoot_PointerExited"
             Tapped="IslandRoot_Tapped">
-            <!-- 单一 ContentHost：内容由插件通过 IIslandHost.SetContent 设置 -->
-            <ContentPresenter x:Name="ContentHost" />
+            <Grid x:Name="ContentPanel">
+                <ContentPresenter x:Name="ContentHost" />
+                <StackPanel
+                    x:Name="MultiHost"
+                    Visibility="Collapsed"
+                    Spacing="0" />
+            </Grid>
         </Border>
     </Grid>
 </Window>

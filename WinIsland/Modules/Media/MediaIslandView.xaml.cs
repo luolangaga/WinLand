@@ -1,5 +1,7 @@
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using WinIsland.Core;
 
@@ -8,56 +10,68 @@ namespace WinIsland.Modules.Media;
 /// <summary>
 /// 统一变形视图：单个 UserControl 同时承载紧凑态与展开态的所有元素。
 /// 实现 IMorphView，由主程序在展开/收起时调用，与岛体尺寸动画同步。
+/// 节奏光晕通过 AudioLevelMonitor 读取实时音频频段能量，每帧驱动光晕缩放/透明度。
 /// </summary>
 public sealed partial class MediaIslandView : UserControl, IMorphView
 {
     private readonly Storyboard _barsStoryboard = new();
     private bool _barsRunning;
     private Storyboard? _morphStoryboard;
+    private bool _isExpanded;
+
+    private readonly AudioLevelMonitor? _levelMonitor;
+    private readonly DispatcherQueueTimer _glowTimer;
+    private float _uiBass, _uiMid, _uiTreble;
 
     internal MediaViewModel ViewModel { get; }
 
     UIElement IMorphView.View => this;
 
-    public MediaIslandView(MediaViewModel vm)
+    internal MediaIslandView(MediaViewModel vm, AudioLevelMonitor? levelMonitor)
     {
         ViewModel = vm;
+        _levelMonitor = levelMonitor;
         InitializeComponent();
 
         BuildBarsAnimation();
         Loaded += (_, _) => SyncBars();
-        Unloaded += (_, _) => StopBars();
+        Unloaded += (_, _) => { StopBars(); _glowTimer?.Stop(); };
         ViewModel.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(MediaViewModel.IsPlaying)) SyncBars();
+            if (e.PropertyName is nameof(MediaViewModel.IsPlaying) or nameof(MediaViewModel.GlowEnabled))
+                SyncGlow();
         };
+
+        _glowTimer = DispatcherQueue.CreateTimer();
+        _glowTimer.Interval = TimeSpan.FromMilliseconds(16);
+        _glowTimer.Tick += (_, _) => OnGlowTick();
     }
 
     public void AnimateToExpanded(TimeSpan duration)
     {
+        double currentSpacing = MainGrid.ColumnSpacing;
         _morphStoryboard?.Stop();
-
-         // 立即设置非动画属性
-    RootGrid.Padding = new Thickness(20, 16, 20, 12);
-    MainGrid.ColumnSpacing = 14;
-    Cover.CornerRadius = new CornerRadius(14);
-    
-    Title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
-        Title.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White);
-        StopBars();
+        _isExpanded = true;
+        SyncGlow();
 
         var sb = new Storyboard();
         var easing = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.45 };
+        var midTime = TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.5);
 
-        // 封面放大
+        sb.Children.Add(DiscreteKeyFrameAnim(RootGrid, "Padding",
+            new Thickness(20, 16, 20, 12), midTime));
+        sb.Children.Add(Anim(MainGrid, "ColumnSpacing", currentSpacing, 14, duration, easing));
+        sb.Children.Add(DiscreteKeyFrameAnim(Cover, "CornerRadius",
+            new CornerRadius(14), midTime));
+
+        StopBars();
+
         sb.Children.Add(Anim(Cover, "Width", 26, 72, duration, easing));
         sb.Children.Add(Anim(Cover, "Height", 26, 72, duration, easing));
         sb.Children.Add(Anim(PlaceholderIcon, "FontSize", 12, 28, duration, easing));
-
-        // 标题字号放大
         sb.Children.Add(Anim(Title, "FontSize", 12, 15, duration, easing));
 
-        // 艺术家：高度 + 透明度
         var halfDur = TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.4);
         sb.Children.Add(Anim(Artist, "Height", 0, 20, halfDur,
             new CubicEase { EasingMode = EasingMode.EaseOut },
@@ -66,12 +80,10 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
             new CubicEase { EasingMode = EasingMode.EaseOut },
             beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.2)));
 
-        // 音频条淡出
         sb.Children.Add(Anim(Bars, "Opacity", 1, 0,
             TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3),
             new CubicEase { EasingMode = EasingMode.EaseIn }));
 
-        // 播控：高度 + 透明度
         sb.Children.Add(Anim(Controls, "Height", 0, 48, halfDur,
             new CubicEase { EasingMode = EasingMode.EaseOut },
             beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3)));
@@ -79,50 +91,72 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
             new CubicEase { EasingMode = EasingMode.EaseOut },
             beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3)));
 
+        if (ViewModel.GlowEnabled)
+        {
+            sb.Children.Add(Anim(GlowLayer, "Opacity", 0, 1,
+                TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.5),
+                new CubicEase { EasingMode = EasingMode.EaseOut },
+                beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3)));
+        }
+
+        sb.Completed += (_, _) =>
+        {
+            Title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+            Title.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White);
+            if (ViewModel.GlowEnabled)
+                GlowLayer.Opacity = 1;
+            SyncGlow();
+        };
+
         _morphStoryboard = sb;
         sb.Begin();
     }
 
     public void AnimateToCompact(TimeSpan duration)
     {
+        double currentSpacing = MainGrid.ColumnSpacing;
         _morphStoryboard?.Stop();
+        _isExpanded = false;
+        _glowTimer.Stop();
 
         var sb = new Storyboard();
         var easing = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.45 };
+        var midTime = TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.5);
 
-        // 封面缩小
+        sb.Children.Add(DiscreteKeyFrameAnim(RootGrid, "Padding",
+            new Thickness(8, 0, 14, 0), midTime));
+        sb.Children.Add(Anim(MainGrid, "ColumnSpacing", currentSpacing, 10, duration, easing));
+        sb.Children.Add(DiscreteKeyFrameAnim(Cover, "CornerRadius",
+            new CornerRadius(7), midTime));
+
         sb.Children.Add(Anim(Cover, "Width", Cover.ActualWidth > 0 ? Cover.ActualWidth : 72, 26, duration, easing));
         sb.Children.Add(Anim(Cover, "Height", Cover.ActualHeight > 0 ? Cover.ActualHeight : 72, 26, duration, easing));
         sb.Children.Add(Anim(PlaceholderIcon, "FontSize", PlaceholderIcon.FontSize > 0 ? PlaceholderIcon.FontSize : 28, 12, duration, easing));
-
-        // 标题字号缩小
         sb.Children.Add(Anim(Title, "FontSize", Title.FontSize > 0 ? Title.FontSize : 15, 12, duration, easing));
 
-        // 艺术家：高度 + 透明度（先收）
         var thirdDur = TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3);
         sb.Children.Add(Anim(Artist, "Height", Artist.ActualHeight > 0 ? Artist.ActualHeight : 20, 0, thirdDur,
             new CubicEase { EasingMode = EasingMode.EaseIn }));
         sb.Children.Add(Anim(Artist, "Opacity", Artist.Opacity > 0 ? Artist.Opacity : 1, 0, thirdDur,
             new CubicEase { EasingMode = EasingMode.EaseIn }));
 
-        // 播控：高度 + 透明度（先收）
         sb.Children.Add(Anim(Controls, "Height", Controls.ActualHeight > 0 ? Controls.ActualHeight : 48, 0, thirdDur,
             new CubicEase { EasingMode = EasingMode.EaseIn }));
         sb.Children.Add(Anim(Controls, "Opacity", Controls.Opacity > 0 ? Controls.Opacity : 1, 0, thirdDur,
             new CubicEase { EasingMode = EasingMode.EaseIn }));
 
-        // 音频条淡入（后出）
         var twoThirdDur = TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.5);
         sb.Children.Add(Anim(Bars, "Opacity", Bars.Opacity >= 0 ? Bars.Opacity : 0, 1, twoThirdDur,
             new CubicEase { EasingMode = EasingMode.EaseOut },
             beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3)));
 
+        sb.Children.Add(Anim(GlowLayer, "Opacity",
+            GlowLayer.Opacity > 0 ? GlowLayer.Opacity : 1, 0,
+            TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3),
+            new CubicEase { EasingMode = EasingMode.EaseIn }));
+
         sb.Completed += (_, _) =>
         {
-            // 动画完成后设置非动画属性
-            RootGrid.Padding = new Thickness(8, 0, 14, 0);
-            MainGrid.ColumnSpacing = 10;
-            Cover.CornerRadius = new CornerRadius(7);
             Title.FontWeight = Microsoft.UI.Text.FontWeights.Normal;
             Title.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
                 Windows.UI.Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF));
@@ -132,6 +166,68 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
         _morphStoryboard = sb;
         sb.Begin();
     }
+
+    #region 节奏光晕 — 读取 AudioLevelMonitor 实时频段能量
+
+    private int _glowTick;
+    private float _ambientPhase;
+
+    private void OnGlowTick()
+    {
+        _glowTick++;
+
+        if (_levelMonitor != null && _levelMonitor.IsRunning)
+        {
+            float bass = _levelMonitor.Bass;
+            float mid = _levelMonitor.Mid;
+            float treble = _levelMonitor.Treble;
+
+            _uiBass += (bass - _uiBass) * 0.45f;
+            _uiMid += (mid - _uiMid) * 0.40f;
+            _uiTreble += (treble - _uiTreble) * 0.38f;
+        }
+        else
+        {
+            _ambientPhase += 0.03f;
+            float pulse = 0.12f * ((float)Math.Sin(_ambientPhase) * 0.5f + 0.5f);
+            float pulse2 = 0.10f * ((float)Math.Sin(_ambientPhase * 0.7f + 1.0f) * 0.5f + 0.5f);
+            float pulse3 = 0.08f * ((float)Math.Sin(_ambientPhase * 1.3f + 2.0f) * 0.5f + 0.5f);
+
+            _uiBass = _uiBass * 0.92f + pulse * 0.08f;
+            _uiMid = _uiMid * 0.92f + pulse2 * 0.08f;
+            _uiTreble = _uiTreble * 0.92f + pulse3 * 0.08f;
+        }
+
+        float b = Math.Clamp(_uiBass, 0f, 1f);
+        float m = Math.Clamp(_uiMid, 0f, 1f);
+        float t = Math.Clamp(_uiTreble, 0f, 1f);
+
+        // 低频：大范围扩散 + 强亮度 punch（鼓点冲击感）
+        Glow1Scale.ScaleX = Glow1Scale.ScaleY = 0.50 + b * 1.8;
+        Glow1.Opacity = 0.40 + b * 0.60;
+
+        // 中频：中等扩散 + 明亮闪烁
+        Glow2Scale.ScaleX = Glow2Scale.ScaleY = 0.45 + m * 1.4;
+        Glow2.Opacity = 0.35 + m * 0.55;
+
+        // 高频：快速闪烁（镲片/齿音）
+        Glow3Scale.ScaleX = Glow3Scale.ScaleY = 0.40 + t * 1.0;
+        Glow3.Opacity = 0.30 + t * 0.50;
+    }
+
+    private void SyncGlow()
+    {
+        bool shouldGlow = _isExpanded && ViewModel.IsPlaying && ViewModel.GlowEnabled;
+        AudioLog.Write($"SyncGlow: expanded={_isExpanded}, playing={ViewModel.IsPlaying}, glow={ViewModel.GlowEnabled}, shouldGlow={shouldGlow}, timerRunning={_glowTimer.IsRunning}, monitorRunning={_levelMonitor?.IsRunning}, monitorStatus={_levelMonitor?.Status}");
+        if (shouldGlow && !_glowTimer.IsRunning)
+            _glowTimer.Start();
+        else if (!shouldGlow && _glowTimer.IsRunning)
+            _glowTimer.Stop();
+    }
+
+    #endregion
+
+    #region 辅助动画方法
 
     private static DoubleAnimation Anim(
         DependencyObject target, string property,
@@ -151,6 +247,24 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
         Storyboard.SetTargetProperty(anim, property);
         return anim;
     }
+
+    private static ObjectAnimationUsingKeyFrames DiscreteKeyFrameAnim(
+        DependencyObject target, string property, object value, TimeSpan keyTime)
+    {
+        var anim = new ObjectAnimationUsingKeyFrames();
+        anim.KeyFrames.Add(new DiscreteObjectKeyFrame
+        {
+            KeyTime = keyTime,
+            Value = value,
+        });
+        Storyboard.SetTarget(anim, target);
+        Storyboard.SetTargetProperty(anim, property);
+        return anim;
+    }
+
+    #endregion
+
+    #region 音频条动画
 
     private void BuildBarsAnimation()
     {
@@ -200,6 +314,8 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
             _barsRunning = false;
         }
     }
+
+    #endregion
 
     private void Previous_Click(object sender, RoutedEventArgs e) => ViewModel.SkipPrevious?.Invoke();
     private void PlayPause_Click(object sender, RoutedEventArgs e) => ViewModel.TogglePlayPause?.Invoke();

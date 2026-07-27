@@ -37,6 +37,27 @@
         </Border>
 
         <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="节奏光晕" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="展开岛体时显示随音乐脉动的彩色光晕背景" />
+                </StackPanel>
+                <ToggleSwitch
+                    x:Name="GlowToggle"
+                    Grid.Column="1"
+                    Margin="0,0,-110,0"
+                    Toggled="GlowToggle_Toggled" />
+            </Grid>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
             <StackPanel Spacing="6">
                 <TextBlock Text="当前状态" />
                 <TextBlock

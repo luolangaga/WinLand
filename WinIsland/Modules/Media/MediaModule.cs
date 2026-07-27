@@ -20,6 +20,7 @@ public sealed class MediaModule : IIslandModule
 
     private MediaViewModel _vm = null!;
     private IslandLiveContent _content = null!;
+    private AudioLevelMonitor? _levelMonitor;
     private bool _enabled;
     private bool _liveShown;
     private int _refreshVersion;
@@ -38,11 +39,14 @@ public sealed class MediaModule : IIslandModule
             TogglePlayPause = () => _ = _session?.TryTogglePlayPauseAsync(),
             SkipNext = () => _ = _session?.TrySkipNextAsync(),
             SkipPrevious = () => _ = _session?.TrySkipPreviousAsync(),
+            GlowEnabled = api.Settings.Get("media.glow", true),
         };
+
+        _levelMonitor = new AudioLevelMonitor();
 
         _content = new IslandLiveContent
         {
-            MorphView = new MediaIslandView(_vm),
+            MorphView = new MediaIslandView(_vm, _levelMonitor),
             CompactSize = new Windows.Foundation.Size(250, 40),
             ExpandedSize = new Windows.Foundation.Size(420, 158),
         };
@@ -52,9 +56,16 @@ public sealed class MediaModule : IIslandModule
 
         api.Settings.Changed += key =>
         {
-            if (key != "media.enabled") return;
-            _enabled = _api.Settings.Get("media.enabled", true);
-            RunOnUI(() => _ = RefreshAsync());
+            if (key == "media.enabled")
+            {
+                _enabled = _api.Settings.Get("media.enabled", true);
+                RunOnUI(() => _ = RefreshAsync());
+            }
+            else if (key == "media.glow")
+            {
+                _vm.GlowEnabled = _api.Settings.Get("media.glow", true);
+                UpdateLevelMonitor();
+            }
         };
 
         try
@@ -72,6 +83,9 @@ public sealed class MediaModule : IIslandModule
     public Task ShutdownAsync()
     {
         DetachSession();
+        _levelMonitor?.Stop();
+        _levelMonitor?.Dispose();
+        _levelMonitor = null;
         _manager = null;
         return Task.CompletedTask;
     }
@@ -143,6 +157,7 @@ public sealed class MediaModule : IIslandModule
             if (!active) return;
 
             _vm.IsPlaying = status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+            UpdateLevelMonitor();
             StatusText = $"{(_vm.IsPlaying ? "正在播放" : "已暂停")}：{_vm.Title} - {_vm.Artist}（来自 {session.SourceAppUserModelId}）";
         }
         catch
@@ -159,6 +174,7 @@ public sealed class MediaModule : IIslandModule
         if (!_enabled || session == null)
         {
             StatusText = _enabled ? "当前没有活动的媒体会话" : "模块已停用";
+            _levelMonitor?.Stop();
             SetLive(false);
             return;
         }
@@ -171,6 +187,7 @@ public sealed class MediaModule : IIslandModule
             if (!active)
             {
                 StatusText = "当前没有活动的媒体会话";
+                _levelMonitor?.Stop();
                 SetLive(false);
                 return;
             }
@@ -181,6 +198,7 @@ public sealed class MediaModule : IIslandModule
             _vm.Title = string.IsNullOrWhiteSpace(props.Title) ? "未知曲目" : props.Title;
             _vm.Artist = string.IsNullOrWhiteSpace(props.Artist) ? session.SourceAppUserModelId : props.Artist;
             _vm.IsPlaying = status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+            UpdateLevelMonitor();
             StatusText = $"{(_vm.IsPlaying ? "正在播放" : "已暂停")}：{_vm.Title} - {_vm.Artist}（来自 {session.SourceAppUserModelId}）";
 
             SetLive(true);
@@ -227,5 +245,14 @@ public sealed class MediaModule : IIslandModule
         if (show == _liveShown) return;
         _liveShown = show;
         _api.SetLiveContent(Id, show ? _content : null);
+    }
+
+    private void UpdateLevelMonitor()
+    {
+        AudioLog.Write($"UpdateLevelMonitor: IsPlaying={_vm.IsPlaying}, enabled={_enabled}, Glow={_vm.GlowEnabled}, monitor={_levelMonitor != null}, running={_levelMonitor?.IsRunning}, status={_levelMonitor?.Status}");
+        if (_vm.IsPlaying && _enabled && _vm.GlowEnabled)
+            _levelMonitor?.Start();
+        else
+            _levelMonitor?.Stop();
     }
 }

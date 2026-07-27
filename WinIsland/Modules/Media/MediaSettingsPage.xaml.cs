@@ -17,6 +17,7 @@ public sealed partial class MediaSettingsPage : UserControl
         InitializeComponent();
 
         EnableToggle.IsOn = _api.Settings.Get("media.enabled", true);
+        GlowToggle.IsOn = _api.Settings.Get("media.glow", true);
         StatusText.Text = _module.StatusText;
         _loading = false;
     }
@@ -25,6 +26,12 @@ public sealed partial class MediaSettingsPage : UserControl
     {
         if (_loading) return;
         _api.Settings.Set("media.enabled", EnableToggle.IsOn);
+    }
+
+    private void GlowToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _api.Settings.Set("media.glow", GlowToggle.IsOn);
     }
 
     private void Refresh_Click(object sender, RoutedEventArgs e)

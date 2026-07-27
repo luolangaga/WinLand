@@ -10,13 +10,16 @@
 using System;
 using System.Reflection;
 
-[assembly: System.Reflection.AssemblyCompanyAttribute("WinIsland.Core")]
+[assembly: System.Reflection.AssemblyCompanyAttribute("luolan")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
+[assembly: System.Reflection.AssemblyDescriptionAttribute(("WinIsland plugin SDK — interfaces and base classes for building Dynamic Island mo" +
+    "dules"))]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0d9f1d7d7b9877ba3baea0ba22b5d1650c9feac9")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+87ad20c0ce30076a2eb7c6e3cffd1e2cdb121f87")]
 [assembly: System.Reflection.AssemblyProductAttribute("WinIsland.Core")]
 [assembly: System.Reflection.AssemblyTitleAttribute("WinIsland.Core")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyMetadataAttribute("RepositoryUrl", "https://github.com/luolan/winland")]
 [assembly: System.Runtime.Versioning.TargetPlatformAttribute("Windows10.0.26100.0")]
 [assembly: System.Runtime.Versioning.SupportedOSPlatformAttribute("Windows10.0.17763.0")]
 

@@ -11,26 +11,21 @@ using WinIsland.Core;
 
 namespace WinIsland.Island;
 
-/// <summary>
-/// 灵动岛悬浮窗：无边框、透明、置顶、不抢焦点。
-/// 主程序拥有全部状态机：空闲 → 紧凑 → 展开 → 临时消息。
-/// 悬浮检测、尺寸动画、圆角、临时消息覆盖/恢复全部由主程序统一管理。
-/// 插件只提供内容（IslandLiveContent），不接触尺寸。
-/// </summary>
 public sealed partial class IslandWindow : Window
 {
     private const double Pad = 24;
     private static readonly Size IdleSize = new(128, 34);
     private static readonly TimeSpan ExpandDuration = TimeSpan.FromMilliseconds(333);
     private static readonly TimeSpan CollapseDuration = TimeSpan.FromMilliseconds(250);
+    private const double SplitGap = 8;
+    private const double ExpandedItemGap = 6;
+    private const double StaggerDelayMs = 60;
 
     private readonly SettingsService _settings;
     private readonly nint _hwnd;
     private readonly OverlappedPresenter _presenter;
 
-    // 常驻内容栈
     private readonly List<(string Owner, IslandLiveContent Content)> _live = new();
-    // 临时内容
     private UIElement? _tempContent;
     private Size _tempSize;
 
@@ -51,6 +46,7 @@ public sealed partial class IslandWindow : Window
     private readonly RectangleGeometry _clip = new();
 
     private IslandLiveContent? ActiveLive => _live.Count > 0 ? _live[^1].Content : null;
+    private bool IsMultiActive => _live.Count > 1;
 
     public IslandWindow(SettingsService settings)
     {
@@ -108,14 +104,13 @@ public sealed partial class IslandWindow : Window
         ApplyWindowBounds(IdleSize);
     }
 
-    #region 公开操作（由 IslandService 在 UI 线程调用）
+    #region 公开操作
 
     public void SetLive(string owner, IslandLiveContent? content)
     {
         _live.RemoveAll(t => t.Owner == owner);
         if (content != null) _live.Add((owner, content));
 
-        // 临时内容展示中不打断，结束后自然恢复
         if (_tempContent != null)
         {
             UpdateVisibility();
@@ -134,14 +129,18 @@ public sealed partial class IslandWindow : Window
         _tempTimer.Interval = duration;
         _tempTimer.Start();
 
-        // 收起展开态
         _expanded = false;
 
-        var live = ActiveLive;
-        if (live?.MorphView != null)
-            live.MorphView.AnimateToCompact(CollapseDuration);
+        if (IsMultiActive)
+            AnimateAllMorphToCompact(CollapseDuration);
+        else
+        {
+            var live = ActiveLive;
+            if (live?.MorphView != null)
+                live.MorphView.AnimateToCompact(CollapseDuration);
+        }
 
-        ContentHost.Content = content;
+        ShowSingleContent(content);
         AnimateSize(size, CollapseDuration);
         SetCornerRadius(Math.Min(28, size.Height / 2));
         UpdateVisibility();
@@ -179,28 +178,67 @@ public sealed partial class IslandWindow : Window
 
     #endregion
 
+    #region 内容切换辅助
+
+    private void ShowSingleContent(UIElement content)
+    {
+        MultiHost.Visibility = Visibility.Collapsed;
+        ContentHost.Visibility = Visibility.Visible;
+        ContentHost.Content = content;
+        IslandRoot.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0x00, 0x00, 0x00));
+    }
+
+    private void ShowMultiContent()
+    {
+        ContentHost.Visibility = Visibility.Collapsed;
+        ContentHost.Content = null;
+        MultiHost.Visibility = Visibility.Visible;
+    }
+
+    private void ShowSingleLive(IslandLiveContent live)
+    {
+        MultiHost.Visibility = Visibility.Collapsed;
+        ContentHost.Visibility = Visibility.Visible;
+        IslandRoot.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0x00, 0x00, 0x00));
+        if (live.MorphView != null)
+            ContentHost.Content = live.MorphView.View;
+        else
+            ContentHost.Content = live.CompactContent ?? _idleContent;
+    }
+
+    #endregion
+
     #region 状态机
 
-    /// <summary>根据当前状态（有无常驻内容、是否悬停）切换到正确的视觉态。</summary>
     private void TransitionToLiveState()
     {
-        var live = ActiveLive;
-        if (live == null)
+        if (_live.Count == 0)
         {
-            // 无常驻内容 → 空闲态
             _expanded = false;
-            ContentHost.Content = _idleContent;
+            ShowSingleContent(_idleContent);
             AnimateSize(IdleSize, CollapseDuration);
             SetCornerRadius(IdleSize.Height / 2);
             return;
         }
 
-        // 有常驻内容 → 紧凑态（或展开态如果仍在悬停）
+        if (_live.Count == 1)
+        {
+            TransitionSingleLive();
+            return;
+        }
+
+        TransitionMultiLive();
+    }
+
+    private void TransitionSingleLive()
+    {
+        var live = ActiveLive!;
         bool wantExpand = _hover;
+
+        ShowSingleLive(live);
 
         if (live.MorphView != null)
         {
-            ContentHost.Content = live.MorphView.View;
             if (wantExpand)
             {
                 _expanded = true;
@@ -218,7 +256,6 @@ public sealed partial class IslandWindow : Window
         }
         else
         {
-            // 非变形模式：紧凑/展开两个视图
             if (wantExpand && live.ExpandedContent != null)
             {
                 _expanded = true;
@@ -236,55 +273,257 @@ public sealed partial class IslandWindow : Window
         }
     }
 
-    /// <summary>悬浮进入：展开常驻内容。</summary>
-    private void OnHoverEnter()
+    private void TransitionMultiLive()
     {
-        if (_tempContent != null) return; // 临时内容展示中不展开
+        bool wantExpand = _hover;
 
-        var live = ActiveLive;
-        if (live == null) return;
-        if (live.MorphView == null && live.ExpandedContent == null) return;
-        if (_expanded) return;
-
-        _expanded = true;
-
-        if (live.MorphView != null)
+        if (wantExpand)
         {
-            AnimateSize(live.ExpandedSize, ExpandDuration);
-            SetCornerRadius(Math.Min(28, live.ExpandedSize.Height / 2));
-            live.MorphView.AnimateToExpanded(ExpandDuration);
+            _expanded = true;
+            RenderMultiExpanded();
         }
         else
         {
-            ContentHost.Content = live.ExpandedContent;
-            AnimateSize(live.ExpandedSize, ExpandDuration);
-            SetCornerRadius(Math.Min(28, live.ExpandedSize.Height / 2));
+            _expanded = false;
+            RenderMultiCompact();
         }
     }
 
-    /// <summary>悬浮离开：收起常驻内容。</summary>
+    #endregion
+
+    #region 多模块紧凑态 — 分屏药丸
+
+    private void RenderMultiCompact()
+    {
+        ShowMultiContent();
+        MultiHost.Orientation = Orientation.Horizontal;
+        MultiHost.Spacing = SplitGap;
+        MultiHost.Children.Clear();
+
+        double totalW = 0;
+        double maxH = 0;
+
+        for (int i = 0; i < _live.Count; i++)
+        {
+            var entry = _live[i];
+            var content = entry.Content;
+            var cs = content.CompactSize;
+
+            var pill = new Border
+            {
+                Width = cs.Width,
+                Height = cs.Height,
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0x1C, 0x1C, 0x1E)),
+                CornerRadius = new CornerRadius(cs.Height / 2),
+                Clip = new RectangleGeometry { Rect = new Rect(0, 0, cs.Width, cs.Height) },
+                Child = content.MorphView?.View ?? content.CompactContent,
+                Tag = entry.Owner,
+            };
+            MultiHost.Children.Add(pill);
+
+            totalW += cs.Width;
+            maxH = Math.Max(maxH, cs.Height);
+
+            if (content.MorphView != null)
+                content.MorphView.AnimateToCompact(CollapseDuration);
+        }
+
+        totalW += SplitGap * (_live.Count - 1);
+
+        IslandRoot.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        AnimateSize(new Size(totalW, maxH), CollapseDuration);
+        SetCornerRadius(maxH / 2);
+    }
+
+    #endregion
+
+    #region 多模块展开态 — 垂直堆叠
+
+    private void RenderMultiExpanded()
+    {
+        ShowMultiContent();
+        IslandRoot.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0x00, 0x00, 0x00));
+        MultiHost.Orientation = Orientation.Vertical;
+        MultiHost.Spacing = ExpandedItemGap;
+        MultiHost.Children.Clear();
+
+        double maxW = 0;
+        double totalH = 0;
+
+        for (int i = 0; i < _live.Count; i++)
+        {
+            var entry = _live[i];
+            var content = entry.Content;
+            var expSize = content.ExpandedSize;
+
+            var itemBorder = new Border
+            {
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF)),
+                CornerRadius = new CornerRadius(12),
+                Padding = new Thickness(4),
+                Tag = entry.Owner,
+                Opacity = 0,
+                RenderTransform = new TranslateTransform { Y = 12 },
+            };
+
+            if (content.MorphView != null)
+            {
+                itemBorder.Child = content.MorphView.View;
+            }
+            else if (content.ExpandedContent != null)
+            {
+                itemBorder.Child = content.ExpandedContent;
+            }
+            else
+            {
+                itemBorder.Child = content.CompactContent;
+            }
+
+            MultiHost.Children.Add(itemBorder);
+
+            maxW = Math.Max(maxW, expSize.Width + 8);
+            totalH += expSize.Height + 8 + ExpandedItemGap;
+        }
+
+        totalH -= ExpandedItemGap;
+
+        AnimateSize(new Size(maxW, totalH), ExpandDuration);
+        SetCornerRadius(Math.Min(28, totalH / 2));
+
+        AnimateMultiExpandItems();
+        AnimateAllMorphToExpanded(ExpandDuration);
+    }
+
+    private void AnimateMultiExpandItems()
+    {
+        var sb = new Storyboard();
+        for (int i = 0; i < MultiHost.Children.Count; i++)
+        {
+            if (MultiHost.Children[i] is not FrameworkElement item) continue;
+            var delay = TimeSpan.FromMilliseconds(StaggerDelayMs * i);
+
+            var opacityAnim = new DoubleAnimation
+            {
+                From = 0,
+                To = 1,
+                Duration = new Duration(TimeSpan.FromMilliseconds(200)),
+                BeginTime = delay,
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                EnableDependentAnimation = true,
+            };
+            Storyboard.SetTarget(opacityAnim, item);
+            Storyboard.SetTargetProperty(opacityAnim, "Opacity");
+            sb.Children.Add(opacityAnim);
+
+            var yAnim = new DoubleAnimation
+            {
+                From = 12,
+                To = 0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(250)),
+                BeginTime = delay,
+                EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.3 },
+                EnableDependentAnimation = true,
+            };
+            Storyboard.SetTarget(yAnim, item.RenderTransform);
+            Storyboard.SetTargetProperty(yAnim, "Y");
+            sb.Children.Add(yAnim);
+        }
+        sb.Begin();
+    }
+
+    #endregion
+
+    #region MorphView 批量操作
+
+    private void AnimateAllMorphToExpanded(TimeSpan duration)
+    {
+        foreach (var entry in _live)
+        {
+            if (entry.Content.MorphView != null)
+                entry.Content.MorphView.AnimateToExpanded(duration);
+        }
+    }
+
+    private void AnimateAllMorphToCompact(TimeSpan duration)
+    {
+        foreach (var entry in _live)
+        {
+            if (entry.Content.MorphView != null)
+                entry.Content.MorphView.AnimateToCompact(duration);
+        }
+    }
+
+    #endregion
+
+    #region 悬浮交互
+
+    private void OnHoverEnter()
+    {
+        if (_tempContent != null) return;
+
+        if (_live.Count == 0) return;
+
+        if (_live.Count == 1)
+        {
+            var live = ActiveLive!;
+            if (live.MorphView == null && live.ExpandedContent == null) return;
+            if (_expanded) return;
+
+            _expanded = true;
+
+            if (live.MorphView != null)
+            {
+                AnimateSize(live.ExpandedSize, ExpandDuration);
+                SetCornerRadius(Math.Min(28, live.ExpandedSize.Height / 2));
+                live.MorphView.AnimateToExpanded(ExpandDuration);
+            }
+            else
+            {
+                ContentHost.Content = live.ExpandedContent;
+                AnimateSize(live.ExpandedSize, ExpandDuration);
+                SetCornerRadius(Math.Min(28, live.ExpandedSize.Height / 2));
+            }
+            return;
+        }
+
+        if (_expanded) return;
+        _expanded = true;
+
+        RenderMultiExpanded();
+    }
+
     private void OnHoverExit()
     {
-        if (_tempContent != null) return; // 临时内容展示中不收起
+        if (_tempContent != null) return;
         if (!_expanded) return;
+
+        if (_live.Count == 0) return;
+
+        if (_live.Count == 1)
+        {
+            var live = ActiveLive;
+            if (live == null) return;
+
+            _expanded = false;
+
+            if (live.MorphView != null)
+            {
+                AnimateSize(live.CompactSize, CollapseDuration);
+                SetCornerRadius(live.CompactSize.Height / 2);
+                live.MorphView.AnimateToCompact(CollapseDuration);
+            }
+            else
+            {
+                ContentHost.Content = live.CompactContent ?? _idleContent;
+                AnimateSize(live.CompactSize, CollapseDuration);
+                SetCornerRadius(live.CompactSize.Height / 2);
+            }
+            return;
+        }
 
         _expanded = false;
 
-        var live = ActiveLive;
-        if (live == null) return;
-
-        if (live.MorphView != null)
-        {
-            AnimateSize(live.CompactSize, CollapseDuration);
-            SetCornerRadius(live.CompactSize.Height / 2);
-            live.MorphView.AnimateToCompact(CollapseDuration);
-        }
-        else
-        {
-            ContentHost.Content = live.CompactContent ?? _idleContent;
-            AnimateSize(live.CompactSize, CollapseDuration);
-            SetCornerRadius(live.CompactSize.Height / 2);
-        }
+        RenderMultiCompact();
     }
 
     #endregion
@@ -321,9 +560,11 @@ public sealed partial class IslandWindow : Window
         }
         var version = ++_animVersion;
 
+        double overshootW = Math.Abs(target.Width - fromW) * 0.5;
+        double overshootH = Math.Abs(target.Height - fromH) * 0.5;
         var union = new Size(
-            Math.Max(Math.Max(fromW, target.Width), _currentIsland.Width),
-            Math.Max(Math.Max(fromH, target.Height), _currentIsland.Height));
+            Math.Max(Math.Max(fromW, target.Width), _currentIsland.Width) + overshootW,
+            Math.Max(Math.Max(fromH, target.Height), _currentIsland.Height) + overshootH);
         ApplyWindowBounds(union, growOnly: true);
 
         _currentIsland = target;
@@ -396,7 +637,7 @@ public sealed partial class IslandWindow : Window
     {
         bool hideIdle = _settings.Get("island.hideWhenIdle", false);
         bool visible = _settings.Get("island.visible", true)
-                       && !(hideIdle && ActiveLive == null && _tempContent == null);
+                       && !(hideIdle && _live.Count == 0 && _tempContent == null);
         if (!force && visible == _shown) return;
         _shown = visible;
         if (visible)
@@ -428,7 +669,7 @@ public sealed partial class IslandWindow : Window
 
     #endregion
 
-    #region 指针交互 — 主程序统一处理
+    #region 指针交互
 
     private void IslandRoot_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
@@ -437,7 +678,6 @@ public sealed partial class IslandWindow : Window
 
         if (_tempContent != null)
         {
-            // 临时内容展示中：延长计时器
             _tempTimer.Stop();
             _tempTimer.Start();
             return;
@@ -447,7 +687,6 @@ public sealed partial class IslandWindow : Window
 
     private void IslandRoot_PointerExited(object sender, PointerRoutedEventArgs e)
     {
-        // 动画中 resize 会误发 Exited；只有光标真离开岛体才收起
         if (IsCursorOverIsland()) return;
         _hover = false;
         _hoverGuard.Stop();
@@ -458,7 +697,6 @@ public sealed partial class IslandWindow : Window
 
     private void IslandRoot_Tapped(object sender, TappedRoutedEventArgs e)
     {
-        // 点击临时消息（非按钮）=> 立即关闭
         if (_tempContent != null && e.OriginalSource is not Microsoft.UI.Xaml.Controls.Primitives.ButtonBase)
         {
             DismissTemporary();
@@ -477,7 +715,6 @@ public sealed partial class IslandWindow : Window
         }
     }
 
-    /// <summary>光标是否在岛体范围内（用目标尺寸而非动画中间值）。</summary>
     private bool IsCursorOverIsland()
     {
         Win32.GetCursorPos(out var pt);

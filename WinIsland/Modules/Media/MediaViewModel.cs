@@ -11,6 +11,7 @@ public sealed class MediaViewModel : INotifyPropertyChanged
     private string _title = "";
     private string _artist = "";
     private bool _isPlaying;
+    private bool _glowEnabled = true;
     private ImageSource? _thumbnail;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -42,6 +43,12 @@ public sealed class MediaViewModel : INotifyPropertyChanged
                 Raise(nameof(PlayPauseGlyph));
             }
         }
+    }
+
+    public bool GlowEnabled
+    {
+        get => _glowEnabled;
+        set => SetField(ref _glowEnabled, value);
     }
 
     public ImageSource? Thumbnail
