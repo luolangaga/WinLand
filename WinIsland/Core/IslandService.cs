@@ -11,20 +11,23 @@ public sealed class IslandService : IDynamicIslandApi
 {
     private readonly IslandWindow _island;
     private readonly SettingsService _settings;
+    private readonly ICallbackServer _callbacks;
     private readonly List<SettingsPageDescriptor> _pages = new();
 
     public event Action? SettingsPagesChanged;
     public event Action<string?>? SettingsOpenRequested;
 
-    public IslandService(IslandWindow island, SettingsService settings)
+    public IslandService(IslandWindow island, SettingsService settings, ICallbackServer callbacks)
     {
         _island = island;
         _settings = settings;
+        _callbacks = callbacks;
     }
 
     public IReadOnlyList<SettingsPageDescriptor> SettingsPages => _pages;
     public DispatcherQueue Dispatcher => _island.DispatcherQueue;
     public ISettingsStore Settings => _settings;
+    public ICallbackServer Callbacks => _callbacks;
 
     public void SetLiveContent(string ownerId, IslandLiveContent? content)
         => RunOnUI(() => _island.SetLive(ownerId, content));

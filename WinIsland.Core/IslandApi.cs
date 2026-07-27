@@ -3,10 +3,20 @@ using Microsoft.UI.Xaml;
 
 namespace WinIsland.Core;
 
+public interface ICallbackServer
+{
+    int Port { get; }
+    string BaseUrl { get; }
+    bool IsRunning { get; }
+    void RegisterRoute(string path, Func<System.Text.Json.JsonElement, Task> handler);
+    void UnregisterRoute(string path, Func<System.Text.Json.JsonElement, Task> handler);
+}
+
 public interface IDynamicIslandApi
 {
     DispatcherQueue Dispatcher { get; }
     ISettingsStore Settings { get; }
+    ICallbackServer Callbacks { get; }
     void SetLiveContent(string ownerId, IslandLiveContent? content);
     void SendMessage(IslandMessage message);
     void ShowContent(UIElement content, Windows.Foundation.Size size, TimeSpan? duration = null);

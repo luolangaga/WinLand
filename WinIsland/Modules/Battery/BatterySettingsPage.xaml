@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="WinIsland.Modules.Battery.BatterySettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <StackPanel Spacing="8">
+        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="充电监控" />
+        <TextBlock
+            Margin="0,0,0,12"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            Style="{StaticResource CaptionTextBlockStyle}"
+            Text="监听充电状态，充电时在灵动岛显示电量和充电功率" />
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="启用充电监控" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="充电时在灵动岛常驻显示，悬停可展开详情" />
+                </StackPanel>
+                <ToggleSwitch
+                    x:Name="EnableToggle"
+                    Grid.Column="1"
+                    Margin="0,0,-110,0"
+                    Toggled="EnableToggle_Toggled" />
+            </Grid>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="充电光晕" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="展开岛体时显示随充电脉动的绿色光晕背景" />
+                </StackPanel>
+                <ToggleSwitch
+                    x:Name="GlowToggle"
+                    Grid.Column="1"
+                    Margin="0,0,-110,0"
+                    Toggled="GlowToggle_Toggled" />
+            </Grid>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <StackPanel Spacing="6">
+                <TextBlock Text="当前状态" />
+                <TextBlock
+                    x:Name="StatusText"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    TextWrapping="Wrap" />
+                <Button
+                    Margin="0,6,0,0"
+                    Click="Refresh_Click"
+                    Content="刷新状态" />
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</UserControl>

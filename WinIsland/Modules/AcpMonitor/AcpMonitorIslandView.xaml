@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="WinIsland.Modules.AcpMonitor.AcpMonitorIslandView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid x:Name="RootGrid" Padding="8,0,14,0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Pulse glow layer (expanded + running) -->
+        <Grid x:Name="GlowLayer" Grid.RowSpan="2" Opacity="0" IsHitTestVisible="False">
+            <Ellipse x:Name="Glow1" RenderTransformOrigin="0.3,0.5" Opacity="0.35">
+                <Ellipse.RenderTransform>
+                    <ScaleTransform x:Name="Glow1Scale" ScaleX="0.50" ScaleY="0.50" />
+                </Ellipse.RenderTransform>
+                <Ellipse.Fill>
+                    <RadialGradientBrush>
+                        <GradientStop Color="#C08E44AD" Offset="0" />
+                        <GradientStop Color="#408E44AD" Offset="0.3" />
+                        <GradientStop Color="#008E44AD" Offset="0.75" />
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+            <Ellipse x:Name="Glow2" RenderTransformOrigin="0.7,0.4" Opacity="0.30">
+                <Ellipse.RenderTransform>
+                    <ScaleTransform x:Name="Glow2Scale" ScaleX="0.45" ScaleY="0.45" />
+                </Ellipse.RenderTransform>
+                <Ellipse.Fill>
+                    <RadialGradientBrush>
+                        <GradientStop Color="#B03498DB" Offset="0" />
+                        <GradientStop Color="#303498DB" Offset="0.3" />
+                        <GradientStop Color="#003498DB" Offset="0.7" />
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+        </Grid>
+
+        <!-- Compact row: icon + agent name + progress bar + step count -->
+        <Grid x:Name="MainGrid" Grid.Row="0" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Agent icon -->
+            <Border
+                x:Name="IconBorder"
+                Width="26"
+                Height="26"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Center"
+                Background="#338E44AD"
+                CornerRadius="7">
+                <FontIcon
+                    x:Name="AgentIcon"
+                    FontSize="12"
+                    Foreground="White"
+                    Glyph="&#xE932;"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center" />
+            </Border>
+
+            <!-- Agent name + progress -->
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                <TextBlock
+                    x:Name="AgentName"
+                    FontSize="12"
+                    Foreground="#D9FFFFFF"
+                    MaxLines="1"
+                    Text="Agent"
+                    TextTrimming="CharacterEllipsis" />
+                <Grid x:Name="ProgressRow" Height="0" Opacity="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ProgressBar
+                        x:Name="ProgressBar"
+                        VerticalAlignment="Center"
+                        Maximum="1"
+                        ShowError="False"
+                        ShowPaused="False"
+                        Value="0" />
+                    <TextBlock
+                        x:Name="StepCount"
+                        Grid.Column="1"
+                        Margin="6,0,0,0"
+                        FontSize="10"
+                        Foreground="#99FFFFFF"
+                        VerticalAlignment="Center"
+                        Text="0/0" />
+                </Grid>
+            </StackPanel>
+
+            <!-- Spinning indicator (compact, running) -->
+            <FontIcon
+                x:Name="SpinnerIcon"
+                Grid.Column="2"
+                FontSize="14"
+                Foreground="#FF9B59B6"
+                Glyph="&#xE72C;"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                RenderTransformOrigin="0.5,0.5">
+                <FontIcon.RenderTransform>
+                    <RotateTransform x:Name="SpinnerRotate" Angle="0" />
+                </FontIcon.RenderTransform>
+            </FontIcon>
+        </Grid>
+
+        <!-- Expanded: plan list + tool call + usage -->
+        <ScrollViewer
+            x:Name="ExpandedPanel"
+            Grid.Row="1"
+            Height="0"
+            Opacity="0"
+            VerticalScrollBarVisibility="Auto"
+            HorizontalScrollBarVisibility="Disabled">
+            <StackPanel x:Name="PlanList" Spacing="4" Padding="0,4,0,0" />
+        </ScrollViewer>
+    </Grid>
+</UserControl>
