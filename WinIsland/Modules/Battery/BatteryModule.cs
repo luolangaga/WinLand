@@ -1,4 +1,3 @@
-using Microsoft.UI.Dispatching;
 using Windows.System.Power;
 using WinIsland.Core;
 using WinBattery = Windows.Devices.Power.Battery;
@@ -25,10 +24,7 @@ public sealed class BatteryModule : IIslandModule
         _api = api;
         _enabled = api.Settings.Get("battery.enabled", true);
 
-        _vm = new BatteryViewModel
-        {
-            GlowEnabled = api.Settings.Get("battery.glow", true),
-        };
+        _vm = new BatteryViewModel();
 
         var islandView = new BatteryIslandView(_vm);
 
@@ -52,10 +48,6 @@ public sealed class BatteryModule : IIslandModule
             {
                 _enabled = _api.Settings.Get("battery.enabled", true);
                 RunOnUI(RefreshState);
-            }
-            else if (key == "battery.glow")
-            {
-                _vm.GlowEnabled = _api.Settings.Get("battery.glow", true);
             }
         };
 
@@ -85,16 +77,19 @@ public sealed class BatteryModule : IIslandModule
     private void OnBatteryReportUpdated()
     {
         if (_battery == null) return;
-        var report = _battery.GetReport();
-        var rate = report.ChargeRateInMilliwatts;
-        if (rate.HasValue && rate.Value > 0)
+
+        try
         {
-            _vm.ChargePower = rate.Value / 1000.0;
+            var report = _battery.GetReport();
+            var chargeRate = report.ChargeRateInMilliwatts;
+
+            if (chargeRate.HasValue && chargeRate.Value > 0)
+            {
+                _vm.ChargePower = chargeRate.Value / 1000.0;
+            }
         }
-        else
-        {
-            _vm.ChargePower = 0;
-        }
+        catch { }
+
         UpdateStatusText();
     }
 
@@ -161,7 +156,7 @@ public sealed class BatteryModule : IIslandModule
             if (status == BatteryStatus.Charging)
             {
                 _vm.StatusText = power > 0 ? $"充电中 · {power:F1} W" : "充电中";
-                StatusText = $"充电中 {percent}% · {power:F1} W";
+                StatusText = power > 0 ? $"充电中 {percent}% · {power:F1} W" : $"充电中 {percent}%";
             }
             else
             {

@@ -38,7 +38,6 @@ public sealed partial class IslandWindow : Window
 
     private readonly DispatcherQueueTimer _tempTimer;
     private readonly DispatcherQueueTimer _hoverGuard;
-    private readonly DispatcherQueueTimer _shrinkTimer;
 
     private readonly UIElement _idleContent;
 
@@ -95,15 +94,6 @@ public sealed partial class IslandWindow : Window
         _hoverGuard.Interval = TimeSpan.FromMilliseconds(300);
         _hoverGuard.IsRepeating = true;
         _hoverGuard.Tick += (_, _) => HoverGuardTick();
-
-        _shrinkTimer = DispatcherQueue.CreateTimer();
-        _shrinkTimer.IsRepeating = false;
-        _shrinkTimer.Interval = TimeSpan.FromMilliseconds(500);
-        _shrinkTimer.Tick += (_, _) =>
-        {
-            if (_sizeStoryboard == null)
-                ApplyWindowBounds(_currentTotalSize, growOnly: false);
-        };
 
         _settings.Changed += OnSettingChanged;
 
@@ -182,7 +172,6 @@ public sealed partial class IslandWindow : Window
     public void RefreshFromSettings()
     {
         UpdateVisibility();
-        _shrinkTimer.Stop();
         ApplyWindowBounds(_currentTotalSize, growOnly: false);
     }
 
@@ -480,8 +469,6 @@ public sealed partial class IslandWindow : Window
 
     private void AnimateIslandSize(Size islandTarget, TimeSpan duration)
     {
-        _shrinkTimer.Stop();
-
         var totalTarget = ComputeTotalSize();
 
         if (islandTarget == _currentIsland && _sizeStoryboard == null)
@@ -525,8 +512,6 @@ public sealed partial class IslandWindow : Window
             _sizeStoryboard = null;
             IslandRoot.Width = islandTarget.Width;
             IslandRoot.Height = islandTarget.Height;
-            ApplyWindowBounds(totalTarget, growOnly: false);
-            _shrinkTimer.Start();
         };
         _sizeStoryboard = sb;
         sb.Begin();
@@ -597,7 +582,6 @@ public sealed partial class IslandWindow : Window
         }
         else
         {
-            _shrinkTimer.Stop();
             _hoverGuard.Stop();
             _hover = false;
             AppWindow.Hide();

@@ -13,7 +13,7 @@
             Margin="0,0,0,12"
             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
             Style="{StaticResource CaptionTextBlockStyle}"
-            Text="监听充电状态，充电时在灵动岛显示电量和充电功率" />
+            Text="监听充电状态，绿色填充灵动岛代表当前电量，悬停展开查看详情" />
 
         <Border Style="{StaticResource SettingsCardStyle}">
             <Grid>
@@ -33,27 +33,6 @@
                     Grid.Column="1"
                     Margin="0,0,-110,0"
                     Toggled="EnableToggle_Toggled" />
-            </Grid>
-        </Border>
-
-        <Border Style="{StaticResource SettingsCardStyle}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Spacing="2" VerticalAlignment="Center">
-                    <TextBlock Text="充电光晕" />
-                    <TextBlock
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="展开岛体时显示随充电脉动的绿色光晕背景" />
-                </StackPanel>
-                <ToggleSwitch
-                    x:Name="GlowToggle"
-                    Grid.Column="1"
-                    Margin="0,0,-110,0"
-                    Toggled="GlowToggle_Toggled" />
             </Grid>
         </Border>
 

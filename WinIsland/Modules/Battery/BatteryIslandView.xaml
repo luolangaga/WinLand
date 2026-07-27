@@ -7,39 +7,38 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid x:Name="RootGrid" Padding="8,0,14,0">
+    <Grid x:Name="RootGrid" Padding="8,0,14,0" Tapped="RootGrid_Tapped">
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
+        <!-- Electric arc layer (charging only) -->
+        <Canvas
+            x:Name="ArcCanvas"
+            Grid.RowSpan="2"
+            IsHitTestVisible="False"
+            Opacity="0" />
+
+        <!-- Glow layer (expanded + charging only) -->
         <Grid x:Name="GlowLayer" Grid.RowSpan="2" Opacity="0" IsHitTestVisible="False">
-            <Ellipse x:Name="Glow1" RenderTransformOrigin="0.35,0.5" Opacity="0.35">
+            <Ellipse
+                x:Name="GlowOrb"
+                RenderTransformOrigin="0.5,0.5"
+                Opacity="0.5">
                 <Ellipse.RenderTransform>
-                    <ScaleTransform x:Name="Glow1Scale" ScaleX="0.50" ScaleY="0.50" />
+                    <ScaleTransform x:Name="GlowOrbScale" ScaleX="0.6" ScaleY="0.6" />
                 </Ellipse.RenderTransform>
                 <Ellipse.Fill>
                     <RadialGradientBrush>
-                        <GradientStop Color="#C06CCB5F" Offset="0" />
-                        <GradientStop Color="#406CCB5F" Offset="0.3" />
-                        <GradientStop Color="#006CCB5F" Offset="0.75" />
-                    </RadialGradientBrush>
-                </Ellipse.Fill>
-            </Ellipse>
-            <Ellipse x:Name="Glow2" RenderTransformOrigin="0.65,0.45" Opacity="0.30">
-                <Ellipse.RenderTransform>
-                    <ScaleTransform x:Name="Glow2Scale" ScaleX="0.45" ScaleY="0.45" />
-                </Ellipse.RenderTransform>
-                <Ellipse.Fill>
-                    <RadialGradientBrush>
-                        <GradientStop Color="#B03CB4E0" Offset="0" />
-                        <GradientStop Color="#303CB4E0" Offset="0.3" />
-                        <GradientStop Color="#003CB4E0" Offset="0.7" />
+                        <GradientStop x:Name="GlowCenter" Color="#806CCB5F" Offset="0" />
+                        <GradientStop x:Name="GlowEdge" Color="#006CCB5F" Offset="0.6" />
                     </RadialGradientBrush>
                 </Ellipse.Fill>
             </Ellipse>
         </Grid>
 
+        <!-- Main compact row -->
         <Grid x:Name="MainGrid" Grid.Row="0" ColumnSpacing="10">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
@@ -47,6 +46,7 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
+            <!-- Battery ring -->
             <Grid
                 x:Name="BatteryRing"
                 Width="26"
@@ -77,10 +77,11 @@
                     VerticalAlignment="Center" />
             </Grid>
 
+            <!-- Percent + Power text -->
             <StackPanel
                 Grid.Column="1"
                 VerticalAlignment="Center"
-                Spacing="3">
+                Spacing="2">
                 <TextBlock
                     x:Name="PercentText"
                     FontSize="12"
@@ -88,23 +89,30 @@
                     Text="{x:Bind ViewModel.PercentText, Mode=OneWay}" />
                 <TextBlock
                     x:Name="PowerText"
-                    Height="0"
-                    FontSize="13"
+                    FontSize="11"
                     Foreground="#99FFFFFF"
                     Opacity="0"
+                    Height="0"
                     Text="{x:Bind ViewModel.ChargePowerText, Mode=OneWay}" />
             </StackPanel>
 
-            <FontIcon
-                x:Name="BoltIcon"
+            <!-- "正在充电" label -->
+            <TextBlock
+                x:Name="ChargingLabel"
                 Grid.Column="2"
-                FontSize="14"
-                Foreground="#FF6CCB5F"
-                Glyph="&#xE703;"
-                Visibility="{x:Bind ViewModel.ChargingVisibility, Mode=OneWay}"
-                VerticalAlignment="Center" />
+                FontSize="10"
+                Foreground="#B06CCB5F"
+                Text="正在充电"
+                VerticalAlignment="Center"
+                Opacity="0"
+                RenderTransformOrigin="0.5,0.5">
+                <TextBlock.RenderTransform>
+                    <TranslateTransform x:Name="ChargingLabelTranslate" X="8" />
+                </TextBlock.RenderTransform>
+            </TextBlock>
         </Grid>
 
+        <!-- Expanded panel -->
         <StackPanel
             x:Name="ExpandedPanel"
             Grid.Row="1"

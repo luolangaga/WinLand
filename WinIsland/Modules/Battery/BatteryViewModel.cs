@@ -11,7 +11,6 @@ public sealed class BatteryViewModel : INotifyPropertyChanged
     private bool _isCharging;
     private double _chargePower;
     private string _statusText = "未在充电";
-    private bool _glowEnabled = true;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -25,7 +24,6 @@ public sealed class BatteryViewModel : INotifyPropertyChanged
                 Raise(nameof(PercentText));
                 Raise(nameof(BatteryGlyph));
                 Raise(nameof(BatteryColor));
-                Raise(nameof(PowerArcAngle));
             }
         }
     }
@@ -41,6 +39,7 @@ public sealed class BatteryViewModel : INotifyPropertyChanged
                 Raise(nameof(BatteryColor));
                 Raise(nameof(ChargingVisibility));
                 Raise(nameof(NotChargingVisibility));
+                Raise(nameof(ChargePowerText));
             }
         }
     }
@@ -63,15 +62,11 @@ public sealed class BatteryViewModel : INotifyPropertyChanged
         set => SetField(ref _statusText, value);
     }
 
-    public bool GlowEnabled
-    {
-        get => _glowEnabled;
-        set => SetField(ref _glowEnabled, value);
-    }
-
     public string PercentText => $"{_percent}%";
 
-    public string ChargePowerText => _chargePower > 0 ? $"{_chargePower:F1} W" : "";
+    public string ChargePowerText => _chargePower > 0
+        ? $"{_chargePower:F1} W"
+        : "";
 
     public string BatteryGlyph => _isCharging ? "\uE859" : (_percent switch
     {
@@ -91,8 +86,6 @@ public sealed class BatteryViewModel : INotifyPropertyChanged
             >= 20 => new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xA6, 0x23)),
             _ => new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0xE8, 0x4D, 0x3D))
         });
-
-    public double PowerArcAngle => _percent * 3.6;
 
     public Visibility ChargingVisibility => _isCharging ? Visibility.Visible : Visibility.Collapsed;
     public Visibility NotChargingVisibility => _isCharging ? Visibility.Collapsed : Visibility.Visible;

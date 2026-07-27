@@ -17,7 +17,6 @@ public sealed partial class BatterySettingsPage : UserControl
         InitializeComponent();
 
         EnableToggle.IsOn = _api.Settings.Get("battery.enabled", true);
-        GlowToggle.IsOn = _api.Settings.Get("battery.glow", true);
         StatusText.Text = _module.StatusText;
         _loading = false;
     }
@@ -26,12 +25,6 @@ public sealed partial class BatterySettingsPage : UserControl
     {
         if (_loading) return;
         _api.Settings.Set("battery.enabled", EnableToggle.IsOn);
-    }
-
-    private void GlowToggle_Toggled(object sender, RoutedEventArgs e)
-    {
-        if (_loading) return;
-        _api.Settings.Set("battery.glow", GlowToggle.IsOn);
     }
 
     private void Refresh_Click(object sender, RoutedEventArgs e)
