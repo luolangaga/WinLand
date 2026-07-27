@@ -34,6 +34,10 @@ public sealed class BatteryModule : IIslandModule
 
         _content = new IslandLiveContent
         {
+            Priority = 50,
+            OwnerLabel = "充电监控",
+            OwnerGlyph = "\uE857",
+            OwnerAccent = Windows.UI.Color.FromArgb(255, 108, 203, 95),
             MorphView = islandView,
             CompactSize = new Windows.Foundation.Size(230, 40),
             ExpandedSize = new Windows.Foundation.Size(420, 150),

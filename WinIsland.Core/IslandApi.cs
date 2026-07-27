@@ -49,6 +49,10 @@ public interface IMorphView
 
 public sealed class IslandLiveContent
 {
+    public int Priority { get; init; }
+    public string? OwnerLabel { get; init; }
+    public string? OwnerGlyph { get; init; }
+    public Windows.UI.Color? OwnerAccent { get; init; }
     public IMorphView? MorphView { get; init; }
     public UIElement? CompactContent { get; init; }
     public UIElement? ExpandedContent { get; init; }

@@ -275,6 +275,10 @@ public sealed class AcpMonitorModule : IIslandModule
 
         _content = new IslandLiveContent
         {
+            Priority = 80,
+            OwnerLabel = "Agent 监控",
+            OwnerGlyph = "\uE932",
+            OwnerAccent = Windows.UI.Color.FromArgb(255, 0, 122, 255),
             MorphView = _islandView,
             CompactSize = new Windows.Foundation.Size(230, 40),
             ExpandedSize = new Windows.Foundation.Size(420, 150),

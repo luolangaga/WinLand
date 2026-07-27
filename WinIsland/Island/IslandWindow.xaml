@@ -9,18 +9,29 @@
     mc:Ignorable="d">
 
     <Grid x:Name="RootGrid" Background="Transparent" RequestedTheme="Dark">
-        <Border
-            x:Name="IslandRoot"
+        <StackPanel
+            x:Name="IslandStack"
             Margin="0,24,0,0"
             HorizontalAlignment="Center"
             VerticalAlignment="Top"
-            Background="#FF000000"
-            CornerRadius="17"
-            PointerEntered="IslandRoot_PointerEntered"
-            PointerExited="IslandRoot_PointerExited"
-            Tapped="IslandRoot_Tapped">
-            <!-- 单一 ContentHost：内容由插件通过 IIslandHost.SetContent 设置 -->
-            <ContentPresenter x:Name="ContentHost" />
-        </Border>
+            Spacing="8"
+            PointerEntered="IslandStack_PointerEntered"
+            PointerExited="IslandStack_PointerExited">
+            <Border
+                x:Name="IslandRoot"
+                HorizontalAlignment="Center"
+                Background="#FF000000"
+                CornerRadius="17"
+                PointerEntered="IslandRoot_PointerEntered"
+                PointerExited="IslandRoot_PointerExited"
+                Tapped="IslandRoot_Tapped">
+                <ContentPresenter x:Name="ContentHost" />
+            </Border>
+            <StackPanel
+                x:Name="QueuePanel"
+                HorizontalAlignment="Center"
+                Spacing="6"
+                Visibility="Collapsed" />
+        </StackPanel>
     </Grid>
 </Window>

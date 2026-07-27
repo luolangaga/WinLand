@@ -46,6 +46,10 @@ public sealed class MediaModule : IIslandModule
 
         _content = new IslandLiveContent
         {
+            Priority = 100,
+            OwnerLabel = "正在播放",
+            OwnerGlyph = "\uE8D6",
+            OwnerAccent = Windows.UI.Color.FromArgb(255, 255, 45, 85),
             MorphView = new MediaIslandView(_vm, _levelMonitor),
             CompactSize = new Windows.Foundation.Size(250, 40),
             ExpandedSize = new Windows.Foundation.Size(420, 158),
