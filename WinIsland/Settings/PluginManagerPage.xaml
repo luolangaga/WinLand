@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="WinIsland.Settings.PluginManagerPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <StackPanel Spacing="8">
+        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="插件管理" />
+        <TextBlock
+            Margin="0,0,0,12"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            Style="{StaticResource CaptionTextBlockStyle}"
+            Text="管理灵动岛功能插件，加载外部 DLL 或禁用已有模块" />
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="加载插件" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="选择一个 DLL 文件加载为灵动岛插件" />
+                </StackPanel>
+                <Button
+                    x:Name="LoadPluginButton"
+                    Grid.Column="1"
+                    Click="LoadPlugin_Click"
+                    Content="浏览 DLL..." />
+            </Grid>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="插件目录" />
+                    <TextBlock
+                        x:Name="PluginsPathText"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="" />
+                </StackPanel>
+                <Button
+                    x:Name="OpenFolderButton"
+                    Grid.Column="1"
+                    Click="OpenFolder_Click"
+                    Content="打开文件夹" />
+            </Grid>
+        </Border>
+
+        <TextBlock
+            Margin="0,16,0,4"
+            Style="{StaticResource SubtitleTextBlockStyle}"
+            Text="已安装插件" />
+
+        <StackPanel x:Name="PluginList" Spacing="6" />
+    </StackPanel>
+</UserControl>

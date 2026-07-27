@@ -8,17 +8,14 @@ using WinIsland.Settings;
 
 namespace WinIsland;
 
-/// <summary>
-/// 应用入口：创建灵动岛窗口、托盘图标，注册功能模块。
-/// </summary>
 public partial class App : Application
 {
     private SettingsService _settings = null!;
     private IslandWindow _island = null!;
     private IslandService _service = null!;
+    private PluginLoader _pluginLoader = null!;
     private TrayIcon? _tray;
-    private SettingsWindow? _settingsWindow;
-    private readonly List<IIslandModule> _modules = new();
+    internal SettingsWindow? _settingsWindow;
     private bool _exiting;
 
     public App()
@@ -33,9 +30,10 @@ public partial class App : Application
         _service = new IslandService(_island, _settings);
         _service.SettingsOpenRequested += OpenSettingsWindow;
 
+        _pluginLoader = new PluginLoader(_service, _settings);
+
         _island.ShowIsland();
 
-        // 托盘图标
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
         _tray = new TrayIcon("WinIsland - 灵动岛", iconPath)
         {
@@ -43,23 +41,18 @@ public partial class App : Application
             MenuProvider = BuildTrayMenu,
         };
 
-        // 注册功能模块（在这里加入你自己的 IIslandModule 实现）
-        _modules.Add(new GeneralModule());
-        _modules.Add(new MediaModule());
-        _modules.Add(new MessageModule());
-        foreach (var module in _modules)
-        {
-            try
-            {
-                await module.InitializeAsync(_service);
-            }
-            catch
-            {
-                // 单个模块初始化失败不影响整体
-            }
-        }
+        _pluginLoader.RegisterBuiltIn(new GeneralModule());
+        _pluginLoader.RegisterBuiltIn(new MediaModule());
+        _pluginLoader.RegisterBuiltIn(new MessageModule());
 
-        // 首次启动打个招呼
+        await _pluginLoader.LoadBuiltInModulesAsync();
+
+        _service.AddSettingsPage(new SettingsPageDescriptor(
+            "plugins", "插件管理", "\uE712",
+            () => new PluginManagerPage(_pluginLoader, _service)));
+
+        await _pluginLoader.DiscoverAndLoadAsync();
+
         _service.SendMessage(new IslandMessage
         {
             Title = "WinIsland 已启动",
@@ -99,17 +92,8 @@ public partial class App : Application
         _exiting = true;
 
         _tray?.Dispose();
-        foreach (var module in _modules)
-        {
-            try
-            {
-                await module.ShutdownAsync();
-            }
-            catch
-            {
-                // 忽略模块退出异常
-            }
-        }
+        await _pluginLoader.ShutdownAllAsync();
+        _pluginLoader.Dispose();
         _settingsWindow?.Close();
         _island.Close();
         Environment.Exit(0);
