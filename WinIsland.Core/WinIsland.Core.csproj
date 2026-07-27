@@ -16,10 +16,25 @@
 
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <PackageId>luolan.winland.Core</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>luolan</Authors>
+    <Description>WinIsland plugin SDK — interfaces and base classes for building Dynamic Island modules</Description>
+    <PackageTags>winisland;dynamic-island;winui3;windows-app-sdk;plugin;sdk</PackageTags>
+    <RepositoryUrl>https://github.com/luolan/winland</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/luolan/winland</PackageProjectUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2526" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\PLUGIN.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 </Project>
