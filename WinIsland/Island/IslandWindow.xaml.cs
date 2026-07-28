@@ -564,6 +564,132 @@ public sealed partial class IslandWindow : Window
 
         if (sizeChanged)
             Win32.RemoveDwmBorder(_hwnd);
+
+        // 关键：把窗口的可点击/可绘制区域限定为「真实可见的小岛形状」，
+        // 四周透明 padding 由 SetWindowRgn 裁掉后，下方窗口可获得点击穿透。
+        ApplyHitRegion();
+    }
+
+    /// <summary>
+    /// 用 SetWindowRgn 把窗口裁成可见岛屿的并集区域（主岛 + 队列每个小岛）。
+    /// 区域外不绘制、不响应点击——这是 WinUI 3 透明窗口实现不规则可点击区的标准做法。
+    /// </summary>
+    private void ApplyHitRegion()
+    {
+        var s = Scale;
+        var physW = _windowPhysW;
+        var physH = _windowPhysH;
+
+        // 主岛在窗口客户区的物理像素位置：水平居中，顶部留 Pad
+        var total = _currentTotalSize;
+        double totalW = total.Width * s;
+        double mainCx = (physW - totalW) / 2.0;
+        double mainY = Pad * s;
+
+        // 临时内容：直接用 _currentIsland（临时态 totalSize 等于 island 尺寸）
+        if (_tempContent != null)
+        {
+            double iw = _currentIsland.Width * s;
+            double ih = _currentIsland.Height * s;
+            double ix = mainCx + (totalW - iw) / 2.0;
+            SetSingleRectRegion((int)Math.Round(ix), (int)Math.Round(mainY),
+                                 (int)Math.Round(ix + iw), (int)Math.Round(mainY + ih));
+            return;
+        }
+
+        var live = ActiveLive;
+        if (live == null)
+        {
+            // 空闲态：只有主岛
+            double iw = IdleSize.Width * s;
+            double ih = IdleSize.Height * s;
+            double ix = mainCx + (totalW - iw) / 2.0;
+            SetSingleRectRegion((int)Math.Round(ix), (int)Math.Round(mainY),
+                                 (int)Math.Round(ix + iw), (int)Math.Round(mainY + ih));
+            return;
+        }
+
+        // 展开态需要主岛 + 队列小岛的并集；紧凑态只有主岛
+        double mainW, mainH;
+        if (_expanded)
+        {
+            mainW = live.ExpandedSize.Width * s;
+            mainH = live.ExpandedSize.Height * s;
+        }
+        else
+        {
+            mainW = live.CompactSize.Width * s;
+            mainH = live.CompactSize.Height * s;
+        }
+        double mainX = mainCx + (totalW - mainW) / 2.0;
+
+        var queue = QueueItems;
+        if (!_expanded || queue.Count == 0)
+        {
+            SetSingleRectRegion((int)Math.Round(mainX), (int)Math.Round(mainY),
+                                 (int)Math.Round(mainX + mainW), (int)Math.Round(mainY + mainH));
+            return;
+        }
+
+        // 主岛 + 每个队列小岛（垂直堆叠，间距 QueueSpacing，映射到物理像素）
+        int count = Math.Min(queue.Count, MaxExpandedItems - 1);
+        var regionRects = new List<(int x1, int y1, int x2, int y2)>(count + 1);
+        regionRects.Add((
+            (int)Math.Round(mainX), (int)Math.Round(mainY),
+            (int)Math.Round(mainX + mainW), (int)Math.Round(mainY + mainH)));
+
+        double cursorY = mainY + mainH + QueueSpacing * s;
+        double queueMaxW = totalW;
+        for (int i = 0; i < count; i++)
+        {
+            var q = queue[i].Content;
+            double qw = q.ExpandedSize.Width * s;
+            double qh = q.ExpandedSize.Height * s;
+            double qx = mainCx + (queueMaxW - qw) / 2.0;
+            regionRects.Add((
+                (int)Math.Round(qx), (int)Math.Round(cursorY),
+                (int)Math.Round(qx + qw), (int)Math.Round(cursorY + qh)));
+            cursorY += qh + QueueSpacing * s;
+        }
+
+        // 合并所有矩形为一个多矩形区域
+        using var combined = CombineRectRegions(regionRects);
+        Win32.SetWindowHitRegion(_hwnd, combined.TakeOwnership(), redraw: true);
+    }
+
+    private void SetSingleRectRegion(int x1, int y1, int x2, int y2)
+    {
+        var rgn = Win32.CreateRectRegion(x1, y1, x2, y2);
+        Win32.SetWindowHitRegion(_hwnd, rgn, redraw: true);
+        // 系统接管所有权，不要 DeleteObject
+    }
+
+    /// <summary>合并多个矩形为单个 HRGN。调用方负责释放。</summary>
+    private static RegionHandle CombineRectRegions(IReadOnlyList<(int x1, int y1, int x2, int y2)> rects)
+    {
+        if (rects.Count == 0)
+            return new RegionHandle(nint.Zero);
+        var first = Win32.CreateRectRegion(rects[0].x1, rects[0].y1, rects[0].x2, rects[0].y2);
+        if (rects.Count == 1)
+            return new RegionHandle(first);
+        var accum = first;
+        for (int i = 1; i < rects.Count; i++)
+        {
+            var next = Win32.CreateRectRegion(rects[i].x1, rects[i].y1, rects[i].x2, rects[i].y2);
+            Win32.MergeRegions(accum, accum, next, Win32.RGN_OR);
+            Win32.DeleteRegion(next);
+        }
+        return new RegionHandle(accum);
+    }
+
+    /// <summary>包装 HRGN：TakeOwnership 后系统接管，否则 dispose 时 DeleteObject。</summary>
+    private struct RegionHandle : IDisposable
+    {
+        private nint _hrgn;
+        private bool _owned;
+        public RegionHandle(nint h) { _hrgn = h; _owned = true; }
+        public nint TakeOwnership() { _owned = false; return _hrgn; }
+        public void Dispose() { if (_owned && _hrgn != nint.Zero) Win32.DeleteRegion(_hrgn); _hrgn = nint.Zero; _owned = false; }
     }
 
     private void UpdateVisibility(bool force = false)

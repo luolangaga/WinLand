@@ -71,8 +71,35 @@ internal static partial class Win32
     private static partial nint CreateRectRgn(int x1, int y1, int x2, int y2);
 
     [LibraryImport("gdi32.dll")]
+    private static partial int CombineRgn(nint hDest, nint hSrc1, nint hSrc2, int combineMode);
+
+    // RGN_AND=1 RGN_OR=2 RGN_XOR=3 RGN_DIFF=4 RGN_COPY=5
+    public const int RGN_OR = 2;
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetWindowRgn(nint hWnd, nint hRgn, [MarshalAs(UnmanagedType.Bool)] bool bRedraw);
+
+    [LibraryImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool DeleteObject(nint hObject);
+
+    /// <summary>
+    /// 将窗口点击/绘制限定为给定区域组合（系统接管所有权，无需 DeleteObject）。
+    /// 传 null 区域清除限制（窗口全尺寸可点击）。
+    /// </summary>
+    public static void SetWindowHitRegion(nint hwnd, nint hRgn, bool redraw = true)
+        => SetWindowRgn(hwnd, hRgn, redraw);
+
+    /// <summary>创建矩形区域。需手动 DeleteObject（除非交给 SetWindowRgn）。</summary>
+    public static nint CreateRectRegion(int x1, int y1, int x2, int y2) => CreateRectRgn(x1, y1, x2, y2);
+
+    /// <summary>合并两个区域到目标，返回目标句柄（系统不接管所有权，需自行管理）。</summary>
+    public static int MergeRegions(nint dest, nint src1, nint src2, int mode = RGN_OR)
+        => CombineRgn(dest, src1, src2, mode);
+
+    /// <summary>手动释放 GDI 区域对象。</summary>
+    public static void DeleteRegion(nint hRgn) => DeleteObject(hRgn);
 
     /// <summary>
     /// 让 DWM 按 alpha 合成窗口表面（参考 WinUIEx）：

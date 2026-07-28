@@ -5,6 +5,7 @@ using WinIsland.Modules;
 using WinIsland.Modules.Media;
 using WinIsland.Modules.Messaging;
 using WinIsland.Modules.Battery;
+using WinIsland.Modules.AiMonitor;
 using WinIsland.Settings;
 
 namespace WinIsland;
@@ -46,6 +47,7 @@ public partial class App : Application
         _pluginLoader.RegisterBuiltIn(new MediaModule());
         _pluginLoader.RegisterBuiltIn(new MessageModule());
         _pluginLoader.RegisterBuiltIn(new BatteryModule());
+        _pluginLoader.RegisterBuiltIn(new AiMonitorModule());
 
         await _pluginLoader.LoadBuiltInModulesAsync();
 
