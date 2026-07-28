@@ -147,7 +147,7 @@ public sealed partial class IslandWindow : Window
 
         ContentHost.Content = content;
         AnimateIslandSize(size, CollapseDuration, isTemporary: true);
-        SetCornerRadius(Math.Min(28, size.Height / 2));
+        SetCornerRadius(size.Height / 2);
         UpdateVisibility();
     }
 
@@ -163,9 +163,9 @@ public sealed partial class IslandWindow : Window
     public void ShowMessage(IslandMessage msg)
     {
         var view = BuildMessageView(msg);
-        const double width = 400;
+        const double width = 280;
         view.Measure(new Size(width, double.PositiveInfinity));
-        var height = Math.Clamp(view.DesiredSize.Height, 76, 180);
+        var height = Math.Clamp(view.DesiredSize.Height, 36, 40);
         ShowTemporary(view, new Size(width, height), msg.Duration);
     }
 
@@ -512,6 +512,7 @@ public sealed partial class IslandWindow : Window
             _sizeStoryboard = null;
             IslandRoot.Width = islandTarget.Width;
             IslandRoot.Height = islandTarget.Height;
+            ApplyWindowBounds(totalTarget, growOnly: false);
         };
         _sizeStoryboard = sb;
         sb.Begin();
@@ -565,22 +566,20 @@ public sealed partial class IslandWindow : Window
         if (sizeChanged)
             Win32.RemoveDwmBorder(_hwnd);
 
-        // 关键：把窗口的可点击/可绘制区域限定为「真实可见的小岛形状」，
-        // 四周透明 padding 由 SetWindowRgn 裁掉后，下方窗口可获得点击穿透。
+        // 关键：更新点击穿透区域，让透明 padding 区的点击穿透到下层窗口。
+        // 用 WM_NCHITTEST + HTTRANSPARENT，不影响绘制。
         ApplyHitRegion();
     }
 
     /// <summary>
-    /// 用 SetWindowRgn 把窗口裁成可见岛屿的并集区域（主岛 + 队列每个小岛）。
-    /// 区域外不绘制、不响应点击——这是 WinUI 3 透明窗口实现不规则可点击区的标准做法。
+    /// 用 GDI 区域标记「可见岛屿」范围，通过 WM_NCHITTEST 子类化让区域外点击穿透。
+    /// 不影响绘制——只影响点击/触控命中测试。
     /// </summary>
     private void ApplyHitRegion()
     {
         var s = Scale;
         var physW = _windowPhysW;
-        var physH = _windowPhysH;
 
-        // 主岛在窗口客户区的物理像素位置：水平居中，顶部留 Pad
         var total = _currentTotalSize;
         double totalW = total.Width * s;
         double mainCx = (physW - totalW) / 2.0;
@@ -592,8 +591,8 @@ public sealed partial class IslandWindow : Window
             double iw = _currentIsland.Width * s;
             double ih = _currentIsland.Height * s;
             double ix = mainCx + (totalW - iw) / 2.0;
-            SetSingleRectRegion((int)Math.Round(ix), (int)Math.Round(mainY),
-                                 (int)Math.Round(ix + iw), (int)Math.Round(mainY + ih));
+            SetHitRgn((int)Math.Round(ix), (int)Math.Round(mainY),
+                       (int)Math.Round(ix + iw), (int)Math.Round(mainY + ih));
             return;
         }
 
@@ -604,8 +603,8 @@ public sealed partial class IslandWindow : Window
             double iw = IdleSize.Width * s;
             double ih = IdleSize.Height * s;
             double ix = mainCx + (totalW - iw) / 2.0;
-            SetSingleRectRegion((int)Math.Round(ix), (int)Math.Round(mainY),
-                                 (int)Math.Round(ix + iw), (int)Math.Round(mainY + ih));
+            SetHitRgn((int)Math.Round(ix), (int)Math.Round(mainY),
+                       (int)Math.Round(ix + iw), (int)Math.Round(mainY + ih));
             return;
         }
 
@@ -626,15 +625,15 @@ public sealed partial class IslandWindow : Window
         var queue = QueueItems;
         if (!_expanded || queue.Count == 0)
         {
-            SetSingleRectRegion((int)Math.Round(mainX), (int)Math.Round(mainY),
-                                 (int)Math.Round(mainX + mainW), (int)Math.Round(mainY + mainH));
+            SetHitRgn((int)Math.Round(mainX), (int)Math.Round(mainY),
+                       (int)Math.Round(mainX + mainW), (int)Math.Round(mainY + mainH));
             return;
         }
 
         // 主岛 + 每个队列小岛（垂直堆叠，间距 QueueSpacing，映射到物理像素）
         int count = Math.Min(queue.Count, MaxExpandedItems - 1);
-        var regionRects = new List<(int x1, int y1, int x2, int y2)>(count + 1);
-        regionRects.Add((
+        var rects = new List<(int x1, int y1, int x2, int y2)>(count + 1);
+        rects.Add((
             (int)Math.Round(mainX), (int)Math.Round(mainY),
             (int)Math.Round(mainX + mainW), (int)Math.Round(mainY + mainH)));
 
@@ -646,50 +645,33 @@ public sealed partial class IslandWindow : Window
             double qw = q.ExpandedSize.Width * s;
             double qh = q.ExpandedSize.Height * s;
             double qx = mainCx + (queueMaxW - qw) / 2.0;
-            regionRects.Add((
+            rects.Add((
                 (int)Math.Round(qx), (int)Math.Round(cursorY),
                 (int)Math.Round(qx + qw), (int)Math.Round(cursorY + qh)));
             cursorY += qh + QueueSpacing * s;
         }
 
-        // 合并所有矩形为一个多矩形区域
-        using var combined = CombineRectRegions(regionRects);
-        Win32.SetWindowHitRegion(_hwnd, combined.TakeOwnership(), redraw: true);
+        SetHitRgn(rects);
     }
 
-    private void SetSingleRectRegion(int x1, int y1, int x2, int y2)
+    private void SetHitRgn(int x1, int y1, int x2, int y2)
     {
         var rgn = Win32.CreateRectRegion(x1, y1, x2, y2);
-        Win32.SetWindowHitRegion(_hwnd, rgn, redraw: true);
-        // 系统接管所有权，不要 DeleteObject
+        Win32.SetHitRegion(rgn);
     }
 
-    /// <summary>合并多个矩形为单个 HRGN。调用方负责释放。</summary>
-    private static RegionHandle CombineRectRegions(IReadOnlyList<(int x1, int y1, int x2, int y2)> rects)
+    private void SetHitRgn(IReadOnlyList<(int x1, int y1, int x2, int y2)> rects)
     {
-        if (rects.Count == 0)
-            return new RegionHandle(nint.Zero);
+        if (rects.Count == 0) { Win32.ClearHitRegion(); return; }
         var first = Win32.CreateRectRegion(rects[0].x1, rects[0].y1, rects[0].x2, rects[0].y2);
-        if (rects.Count == 1)
-            return new RegionHandle(first);
-        var accum = first;
+        if (rects.Count == 1) { Win32.SetHitRegion(first); return; }
         for (int i = 1; i < rects.Count; i++)
         {
             var next = Win32.CreateRectRegion(rects[i].x1, rects[i].y1, rects[i].x2, rects[i].y2);
-            Win32.MergeRegions(accum, accum, next, Win32.RGN_OR);
+            Win32.CombineRgnInPlace(first, next);
             Win32.DeleteRegion(next);
         }
-        return new RegionHandle(accum);
-    }
-
-    /// <summary>包装 HRGN：TakeOwnership 后系统接管，否则 dispose 时 DeleteObject。</summary>
-    private struct RegionHandle : IDisposable
-    {
-        private nint _hrgn;
-        private bool _owned;
-        public RegionHandle(nint h) { _hrgn = h; _owned = true; }
-        public nint TakeOwnership() { _owned = false; return _hrgn; }
-        public void Dispose() { if (_owned && _hrgn != nint.Zero) Win32.DeleteRegion(_hrgn); _hrgn = nint.Zero; _owned = false; }
+        Win32.SetHitRegion(first);
     }
 
     private void UpdateVisibility(bool force = false)
@@ -833,63 +815,47 @@ public sealed partial class IslandWindow : Window
 
     private static FrameworkElement BuildMessageView(IslandMessage msg)
     {
+        var accent = msg.AccentColor ?? Windows.UI.Color.FromArgb(255, 0, 122, 255);
+
         var grid = new Grid
         {
-            Padding = new Thickness(18, 14, 18, 14),
-            ColumnSpacing = 14,
+            ColumnSpacing = 10,
+            Padding = new Thickness(14, 0, 14, 0),
             VerticalAlignment = VerticalAlignment.Center,
         };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        var accent = msg.AccentColor ?? Windows.UI.Color.FromArgb(255, 0, 122, 255);
         var iconHost = new Border
         {
-            Width = 42,
-            Height = 42,
-            CornerRadius = new CornerRadius(21),
+            Width = 24,
+            Height = 24,
+            CornerRadius = new CornerRadius(12),
             Background = new SolidColorBrush(accent),
             VerticalAlignment = VerticalAlignment.Center,
             Child = new FontIcon
             {
                 Glyph = msg.Glyph,
-                FontSize = 18,
+                FontSize = 12,
                 Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
             },
         };
-        grid.Children.Add(iconHost);
-
-        var textPanel = new StackPanel
-        {
-            Spacing = 2,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        Grid.SetColumn(textPanel, 1);
+        Grid.SetColumn(iconHost, 0);
 
         var title = new TextBlock
         {
             Text = msg.Title,
-            FontSize = 15,
+            FontSize = 13,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+            VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxLines = 1,
         };
-        textPanel.Children.Add(title);
+        Grid.SetColumn(title, 1);
 
-        if (!string.IsNullOrWhiteSpace(msg.Text))
-        {
-            textPanel.Children.Add(new TextBlock
-            {
-                Text = msg.Text,
-                FontSize = 13,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(180, 255, 255, 255)),
-                TextWrapping = TextWrapping.Wrap,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                MaxLines = 3,
-            });
-        }
-        grid.Children.Add(textPanel);
+        grid.Children.Add(iconHost);
+        grid.Children.Add(title);
         return grid;
     }
 

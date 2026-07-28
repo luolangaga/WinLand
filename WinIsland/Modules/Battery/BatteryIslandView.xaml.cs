@@ -288,12 +288,7 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
         sb.Children.Add(Anim(PercentText, "FontSize", 12, 15, duration, easing));
 
         var halfDur = TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.4);
-        sb.Children.Add(Anim(PowerText, "Height", 0, 20, halfDur,
-            new CubicEase { EasingMode = EasingMode.EaseOut },
-            beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.2)));
-        sb.Children.Add(Anim(PowerText, "Opacity", 0, 1, halfDur,
-            new CubicEase { EasingMode = EasingMode.EaseOut },
-            beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.2)));
+        sb.Children.Add(Anim(PowerText, "FontSize", 11, 13, duration, easing));
 
         sb.Children.Add(Anim(ChargingLabel, "Opacity", ChargingLabel.Opacity, 0,
             TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3),
@@ -352,12 +347,8 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
             PercentText.FontSize > 0 ? PercentText.FontSize : 15, 12, duration, easing));
 
         var thirdDur = TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3);
-        sb.Children.Add(Anim(PowerText, "Height",
-            PowerText.ActualHeight > 0 ? PowerText.ActualHeight : 20, 0, thirdDur,
-            new CubicEase { EasingMode = EasingMode.EaseIn }));
-        sb.Children.Add(Anim(PowerText, "Opacity",
-            PowerText.Opacity > 0 ? PowerText.Opacity : 1, 0, thirdDur,
-            new CubicEase { EasingMode = EasingMode.EaseIn }));
+        sb.Children.Add(Anim(PowerText, "FontSize",
+            PowerText.FontSize > 0 ? PowerText.FontSize : 13, 11, duration, easing));
 
         sb.Children.Add(Anim(ExpandedPanel, "Height",
             ExpandedPanel.ActualHeight > 0 ? ExpandedPanel.ActualHeight : 65, 0, thirdDur,

@@ -91,8 +91,6 @@
                     x:Name="PowerText"
                     FontSize="11"
                     Foreground="#99FFFFFF"
-                    Opacity="0"
-                    Height="0"
                     Text="{x:Bind ViewModel.ChargePowerText, Mode=OneWay}" />
             </StackPanel>
 

@@ -73,33 +73,28 @@ internal static partial class Win32
     [LibraryImport("gdi32.dll")]
     private static partial int CombineRgn(nint hDest, nint hSrc1, nint hSrc2, int combineMode);
 
-    // RGN_AND=1 RGN_OR=2 RGN_XOR=3 RGN_DIFF=4 RGN_COPY=5
-    public const int RGN_OR = 2;
-
-    [LibraryImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool SetWindowRgn(nint hWnd, nint hRgn, [MarshalAs(UnmanagedType.Bool)] bool bRedraw);
-
     [LibraryImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool DeleteObject(nint hObject);
 
-    /// <summary>
-    /// 将窗口点击/绘制限定为给定区域组合（系统接管所有权，无需 DeleteObject）。
-    /// 传 null 区域清除限制（窗口全尺寸可点击）。
-    /// </summary>
-    public static void SetWindowHitRegion(nint hwnd, nint hRgn, bool redraw = true)
-        => SetWindowRgn(hwnd, hRgn, redraw);
+    [LibraryImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool PtInRegion(nint hRgn, int x, int y);
 
-    /// <summary>创建矩形区域。需手动 DeleteObject（除非交给 SetWindowRgn）。</summary>
+    /// <summary>创建矩形 GDI 区域。需 DeleteObject 释放。</summary>
     public static nint CreateRectRegion(int x1, int y1, int x2, int y2) => CreateRectRgn(x1, y1, x2, y2);
 
-    /// <summary>合并两个区域到目标，返回目标句柄（系统不接管所有权，需自行管理）。</summary>
-    public static int MergeRegions(nint dest, nint src1, nint src2, int mode = RGN_OR)
-        => CombineRgn(dest, src1, src2, mode);
-
-    /// <summary>手动释放 GDI 区域对象。</summary>
+    /// <summary>释放 GDI 区域。</summary>
     public static void DeleteRegion(nint hRgn) => DeleteObject(hRgn);
+
+    /// <summary>判断点是否在区域内。</summary>
+    public static bool IsPointInRegion(nint hRgn, int x, int y) => PtInRegion(hRgn, x, y);
+
+    /// <summary>原地合并：hDest = hDest OR hSrc2。</summary>
+    public static void CombineRgnInPlace(nint hDest, nint hSrc2)
+        => CombineRgn(hDest, hDest, hSrc2, RGN_OR);
+
+    private const int RGN_OR = 2;
 
     /// <summary>
     /// 让 DWM 按 alpha 合成窗口表面（参考 WinUIEx）：
@@ -193,8 +188,13 @@ internal static partial class Win32
     private const uint WM_STYLECHANGING = 0x007C;
     private const uint WM_NCCALCSIZE = 0x0083;
     private const uint WM_NCPAINT = 0x0085;
+    private const uint WM_NCHITTEST = 0x0084;
     /// <summary>WS_CAPTION|WS_SYSMENU|WS_THICKFRAME|WS_MINIMIZEBOX|WS_MAXIMIZEBOX</summary>
     private const uint FrameStyleMask = 0x00CF0000;
+    /// <summary>HTTRANSPARENT：让点击穿透到下层窗口。</summary>
+    private const nint HTTRANSPARENT = -1;
+    /// <summary>HTCLIENT：正常客户区点击。</summary>
+    private const nint HTCLIENT = 1;
 
     private delegate nint SubclassProc(nint hWnd, uint uMsg, nint wParam, nint lParam, nuint uIdSubclass, nint dwRefData);
 
@@ -207,6 +207,28 @@ internal static partial class Win32
 
     // 静态持有委托，防止被 GC 回收
     private static readonly SubclassProc _styleGuardProc = StyleGuardProc;
+
+    // 当前点击区域（由 IslandWindow 更新）。区域外返回 HTTRANSPARENT 穿透点击。
+    private static nint _hitRgn;
+
+    /// <summary>更新点击穿透区域。区域内正常响应，区域外穿透到下层窗口。
+    /// 调用方无需释放 hRgn，由 SetHitRegion 接管所有权。</summary>
+    public static void SetHitRegion(nint hRgn)
+    {
+        var old = _hitRgn;
+        _hitRgn = hRgn;
+        if (old != nint.Zero && old != hRgn)
+            DeleteObject(old);
+    }
+
+    /// <summary>清除点击穿透区域（窗口全部可点击）。</summary>
+    public static void ClearHitRegion()
+    {
+        var old = _hitRgn;
+        _hitRgn = nint.Zero;
+        if (old != nint.Zero)
+            DeleteObject(old);
+    }
 
     private static unsafe nint StyleGuardProc(nint hWnd, uint uMsg, nint wParam, nint lParam, nuint uIdSubclass, nint dwRefData)
     {
@@ -227,8 +249,26 @@ internal static partial class Win32
             *styleNew &= ~FrameStyleMask;
             *styleNew |= WS_POPUP;
         }
+        // 拦截 WM_NCHITTEST：透明 padding 区域返回 HTTRANSPARENT 让点击穿透
+        if (uMsg == WM_NCHITTEST)
+        {
+            var result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            if (result == HTCLIENT)
+            {
+                int x = (short)(lParam & 0xFFFF);
+                int y = (short)((lParam >> 16) & 0xFFFF);
+                ScreenToClient(hWnd, ref x, ref y);
+                var rgn = _hitRgn;
+                if (rgn != nint.Zero && !PtInRegion(rgn, x, y))
+                    return HTTRANSPARENT;
+            }
+            return result;
+        }
         return DefSubclassProc(hWnd, uMsg, wParam, lParam);
     }
+
+    [LibraryImport("user32.dll")]
+    private static partial nint ScreenToClient(nint hWnd, ref int x, ref int y);
 
     /// <summary>安装样式守卫，永久阻止任何代码给窗口加回边框样式。</summary>
     public static void InstallStyleGuard(nint hwnd) => SetWindowSubclass(hwnd, _styleGuardProc, 0x15AD, 0);
