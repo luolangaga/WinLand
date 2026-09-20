@@ -1,0 +1,12 @@
+{
+  "id": "xaml-demo",
+  "name": "XAML 插件",
+  "version": "1.0.0",
+  "description": "示例插件：从插件程序集加载 XAML 视图（PluginXaml.Load 路径）",
+  "author": "WinIsland",
+  "icon_glyph": "\uE7C3",
+  "entry_dll": "XamlPlugin.dll",
+  "api_version": 2,
+  "license": "MIT",
+  "tags": ["sample", "xaml"]
+}

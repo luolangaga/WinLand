@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="WinIsland.Settings.MarketplacePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <StackPanel Spacing="8">
+        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="插件市场" />
+        <TextBlock
+            Margin="0,0,0,12"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            Style="{StaticResource CaptionTextBlockStyle}"
+            Text="插件列表与图标来自社区仓库的 index.json（整个列表只需一次请求）；只有点「安装」才会下载插件包，并强制校验 SHA-256"
+            TextWrapping="Wrap" />
+
+        <InfoBar
+            x:Name="StatusBar"
+            IsClosable="True"
+            IsOpen="False" />
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="4" VerticalAlignment="Center">
+                    <TextBlock Text="市场源" />
+                    <TextBox
+                        x:Name="BaseUrlBox"
+                        LostFocus="BaseUrlBox_LostFocus"
+                        PlaceholderText="留空 = 自动选择市场源（官方源 + jsDelivr 镜像）"
+                        KeyDown="BaseUrlBox_KeyDown" />
+                    <TextBlock
+                        x:Name="BaseUrlHint"
+                        FontSize="11"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel
+                    Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="8"
+                    VerticalAlignment="Bottom">
+                    <Button
+                        x:Name="ResetUrlButton"
+                        Click="ResetUrl_Click"
+                        Content="恢复默认" />
+                    <Button
+                        x:Name="RefreshButton"
+                        Click="Refresh_Click"
+                        Content="刷新列表" />
+                    <Button
+                        x:Name="RepoButton"
+                        Click="Repo_Click"
+                        Content="打开仓库" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Margin="0,8,0,0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <AutoSuggestBox
+                x:Name="SearchBox"
+                PlaceholderText="搜索插件（名称 / Id / 标签）"
+                QueryIcon="Find"
+                TextChanged="Search_TextChanged" />
+            <StackPanel
+                Grid.Column="1"
+                Orientation="Horizontal"
+                Spacing="8"
+                VerticalAlignment="Center">
+                <ProgressRing
+                    x:Name="Busy"
+                    Width="20"
+                    Height="20"
+                    IsActive="False" />
+                <TextBlock
+                    x:Name="UpdatedText"
+                    VerticalAlignment="Center"
+                    FontSize="11"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+        </Grid>
+
+        <StackPanel x:Name="PluginList" Spacing="6" />
+
+        <TextBlock
+            x:Name="EmptyText"
+            Margin="0,24,0,0"
+            HorizontalAlignment="Center"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            Text="没有匹配的插件"
+            Visibility="Collapsed" />
+    </StackPanel>
+</UserControl>

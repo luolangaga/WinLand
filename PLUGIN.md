@@ -141,6 +141,14 @@ Context.Island.SetContent(new IslandLiveContent
 
 `Priority` 决定多个插件同时注册内容时谁占据主岛（数值大者优先，其余进入展开后的队列）。
 小岛只显示主内容；展开后主内容 + 最多 3 个队列内容按大岛样式排列。
+宿主可以在「设置 → 插件管理」里用 `plugin.<pluginId>.priority` 覆盖你声明的 `Priority`，所以不要依赖固定顺序。
+
+**尺寸由宿主统一**：展开态所有元素同宽（取所有活动里最大的展开宽度）、所有队列卡片同高（取最高的一张），
+宿主会把卡片拉伸到这个统一尺寸。视图请用自适应布局（`Grid` 的 `*` 行列、`HorizontalAlignment/VerticalAlignment=Stretch`），
+不要假设自己一定能拿到 `ExpandedSize` 声明的精确尺寸。
+
+需要「临时不占岛」时，推荐像 `samples/HardwareMonitor` 那样加一个 `enabled` 设置：
+关掉时 `SetContent(null)`，打开时重新 `SetContent(content)`，插件本身继续运行。
 
 ---
 
@@ -209,6 +217,8 @@ public sealed partial class MyView : UserControl, IMorphView
 * XAML 文件与类同名，所在文件夹与命名空间一致（`MyPlugin.Views.MyView` ↔ `Views/MyView.xaml`）。
 * XAML 里只用框架类型，不要引用插件自己的自定义控件。
 * 图片等资源用 `Context.PluginDirectory` 拼绝对路径加载，不要用 `ms-appx:`。
+* **视图根元素保持透明背景**：岛体材质由宿主绘制（Apple 风格是纯黑胶囊，Windows Fluent 风格是 Desktop Acrylic / Mica
+  系统材质），插件自绘不透明底色会在切换风格时露出与材质不一致的色块。卡片、徽标用半透明白（如 `#33FFFFFF`）即可适配两种材质。
 * **不要用 `Storyboard` 做形态动画**：属性路径动画在动态加载的 XBF 树上会报
   `Invalid attribute value Unknown for property Height`（E_XAMLPARSEFAILED，会打断宿主的状态机）。
   用逐帧属性赋值（`samples/XamlPlugin` 的 `AnimateToExpanded/Compact` 就是模板）。
@@ -226,6 +236,20 @@ pwsh tools/pack-plugin.ps1 -ProjectDir samples\HelloPlugin
 * **更新**：同 Id 的包会停用旧版本 → 卸载程序集 → 替换目录 → 重新启用。
 * **删除**：「插件管理 → 删除」，会真正移除插件目录；被占用的文件会在下次启动时清理。
 * 包内不需要（也不应该）包含 `WinIsland.Core.dll` 与 WinAppSDK 运行时文件，校验会拒绝前者。
+
+### 发布到社区插件市场
+
+「设置 → 插件市场」读取社区仓库 `luolangaga/WinLandPlugin` 根目录的 `index.json`：**整个列表只发一次请求**
+（图标以 base64 内嵌在清单里，不做逐插件请求），只有点「安装」才下载 `.lwp` 并强制校验 SHA-256。
+
+* 投稿：把 `plugin.json` + `<id>.lwp` + `logo.png`（可选）+ `README.md`（可选）放进 `plugins/<id>/` 后提 PR，
+  合并后 Action 自动重建清单；仓库里的 `tools/submit-plugin.ps1` 负责本地打包与校验。
+* 详情页的 README 由客户端自带的轻量渲染器渲染（`Settings/MarkdownRenderer.cs`）：支持标题、列表、表格、
+  围栏代码块、引用、行内样式与链接；**图片不渲染**（相对路径无从解析，退化为 alt 文本）。
+* `plugin.json` 的 `id` 必须等于目录名，`version` / `entry_dll` 必须与 `.lwp` 包内那份**完全一致**（CI 会校验）。
+* 市场源（可用 `marketplace.baseUrl` 覆盖，留空即自动）：官方 `raw.githubusercontent.com` →
+  **GitCode 国内镜像** `api.gitcode.com/api/v5/repos/luolangaga/WinLandPlugin/raw` → jsDelivr。
+  GitHub 是唯一源头，其余都只是镜像；客户端按顺序尝试并记住上次成功的源。
 
 ---
 

@@ -13,7 +13,8 @@
             Margin="0,0,0,12"
             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
             Style="{StaticResource CaptionTextBlockStyle}"
-            Text="插件以 plugins/&lt;id&gt;/ + plugin.json（或 .lwp 插件包）形式提供，启用/禁用会即时生效且不留残留" />
+            Text="插件以 plugins/&lt;id&gt;/ + plugin.json（或 .lwp 插件包）形式提供，启用/禁用会即时生效且不留残留"
+            TextWrapping="Wrap" />
 
         <InfoBar
             x:Name="WarningBar"
@@ -28,7 +29,7 @@
             IsOpen="False" />
 
         <Border Style="{StaticResource SettingsCardStyle}">
-            <Grid>
+            <Grid ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
@@ -39,12 +40,14 @@
                         x:Name="PluginsPathText"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="" />
+                        Text=""
+                        TextWrapping="Wrap" />
                 </StackPanel>
                 <StackPanel
                     Grid.Column="1"
                     Orientation="Horizontal"
-                    Spacing="8">
+                    Spacing="8"
+                    VerticalAlignment="Center">
                     <Button
                         x:Name="InstallButton"
                         Click="Install_Click"

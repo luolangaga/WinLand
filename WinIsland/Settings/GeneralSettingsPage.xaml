@@ -16,7 +16,59 @@
             Text="灵动岛外观与行为" />
 
         <Border Style="{StaticResource SettingsCardStyle}">
-            <Grid>
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="外观风格" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="Apple 灵动岛：纯黑胶囊；Windows Fluent：系统材质与更小的圆角"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <ComboBox
+                    x:Name="StyleCombo"
+                    Grid.Column="1"
+                    Width="200"
+                    VerticalAlignment="Center"
+                    SelectionChanged="StyleCombo_SelectionChanged">
+                    <ComboBoxItem Content="Apple 灵动岛" />
+                    <ComboBoxItem Content="Windows Fluent" />
+                </ComboBox>
+            </Grid>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="Fluent 材质" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="仅 Windows Fluent 风格生效；不支持的系统自动回退纯色"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <ComboBox
+                    x:Name="MaterialCombo"
+                    Grid.Column="1"
+                    Width="200"
+                    VerticalAlignment="Center"
+                    SelectionChanged="MaterialCombo_SelectionChanged">
+                    <ComboBoxItem Content="Desktop Acrylic（磨砂玻璃）" />
+                    <ComboBoxItem Content="Mica（壁纸着色）" />
+                </ComboBox>
+            </Grid>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
@@ -26,18 +78,22 @@
                     <TextBlock
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="在屏幕顶部中央显示悬浮胶囊" />
+                        Text="在屏幕中央（顶部或底部）显示悬浮胶囊"
+                        TextWrapping="Wrap" />
                 </StackPanel>
                 <ToggleSwitch
                     x:Name="VisibleToggle"
                     Grid.Column="1"
-                    Margin="0,0,-110,0"
+                    MinWidth="0"
+                    VerticalAlignment="Center"
+                    OffContent=""
+                    OnContent=""
                     Toggled="VisibleToggle_Toggled" />
             </Grid>
         </Border>
 
         <Border Style="{StaticResource SettingsCardStyle}">
-            <Grid>
+            <Grid ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
@@ -47,13 +103,108 @@
                     <TextBlock
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="没有任何内容时自动隐藏胶囊" />
+                        Text="没有任何内容时自动隐藏胶囊"
+                        TextWrapping="Wrap" />
                 </StackPanel>
                 <ToggleSwitch
                     x:Name="HideIdleToggle"
                     Grid.Column="1"
-                    Margin="0,0,-110,0"
+                    MinWidth="0"
+                    VerticalAlignment="Center"
+                    OffContent=""
+                    OnContent=""
                     Toggled="HideIdleToggle_Toggled" />
+            </Grid>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="位置" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="贴屏幕顶部，或嵌进底部任务栏（展开向上生长，队列排到岛体上方）"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel
+                    Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="8"
+                    VerticalAlignment="Center">
+                    <ComboBox
+                        x:Name="PositionCombo"
+                        Width="170"
+                        SelectionChanged="PositionCombo_SelectionChanged">
+                        <ComboBoxItem Content="屏幕顶部" />
+                        <ComboBoxItem Content="屏幕底部（嵌入任务栏）" />
+                    </ComboBox>
+                    <ComboBox
+                        x:Name="HorizontalCombo"
+                        Width="110"
+                        SelectionChanged="HorizontalCombo_SelectionChanged">
+                        <ComboBoxItem Content="居中" />
+                        <ComboBoxItem Content="靠左" />
+                        <ComboBoxItem Content="靠右" />
+                    </ComboBox>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock x:Name="OffsetTitle" Text="顶部偏移" />
+                    <TextBlock
+                        x:Name="OffsetHint"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="灵动岛距离屏幕顶部的距离 (px)"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <Slider
+                    x:Name="OffsetSlider"
+                    Grid.Column="1"
+                    Width="200"
+                    Maximum="80"
+                    Minimum="0"
+                    StepFrequency="2"
+                    VerticalAlignment="Center"
+                    ValueChanged="OffsetSlider_ValueChanged" />
+            </Grid>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="水平偏移" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="在上面对齐落点上再左右微调：负值向左、正值向右 (px)"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <Slider
+                    x:Name="HorizontalOffsetSlider"
+                    Grid.Column="1"
+                    Width="200"
+                    Maximum="500"
+                    Minimum="-500"
+                    StepFrequency="2"
+                    VerticalAlignment="Center"
+                    ValueChanged="HorizontalOffsetSlider_ValueChanged" />
             </Grid>
         </Border>
 
@@ -64,20 +215,18 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Spacing="2" VerticalAlignment="Center">
-                    <TextBlock Text="顶部偏移" />
+                    <TextBlock Text="任务栏嵌入（实验性）" />
                     <TextBlock
+                        x:Name="HookStatusText"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="灵动岛距离屏幕顶部的距离 (px)" />
+                        Text="" />
                 </StackPanel>
-                <Slider
-                    x:Name="OffsetSlider"
+                <ToggleSwitch
+                    x:Name="HookToggle"
                     Grid.Column="1"
-                    Width="200"
-                    Maximum="80"
-                    Minimum="0"
-                    StepFrequency="2"
-                    ValueChanged="OffsetSlider_ValueChanged" />
+                    Margin="0,0,-110,0"
+                    Toggled="HookToggle_Toggled" />
             </Grid>
         </Border>
     </StackPanel>

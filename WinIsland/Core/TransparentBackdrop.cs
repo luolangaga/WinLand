@@ -51,20 +51,27 @@ internal static partial class CompositorProvider
     public static Windows.UI.Composition.Compositor Compositor
         => _compositor ??= CreateCompositor();
 
+    /// <summary>
+    /// 确保当前线程有一个 Windows.System.DispatcherQueue。
+    /// SystemBackdrop 与 Mica/Acrylic 控制器都要求它存在（当前线程通常没有）。
+    /// </summary>
+    public static void EnsureDispatcherQueue()
+    {
+        if (Windows.System.DispatcherQueue.GetForCurrentThread() != null) return;
+
+        var options = new DispatcherQueueOptions
+        {
+            dwSize = Marshal.SizeOf<DispatcherQueueOptions>(),
+            threadType = 2,     // DQTYPE_THREAD_CURRENT
+            apartmentType = 2,  // DQTAT_COM_STA
+        };
+        CreateDispatcherQueueController(options, out var controller);
+        _controller = controller; // 防止 DispatcherQueueController 被回收
+    }
+
     private static Windows.UI.Composition.Compositor CreateCompositor()
     {
-        // 当前线程（WinUI UI 线程）通常没有 Windows.System.DispatcherQueue，需要显式创建
-        if (Windows.System.DispatcherQueue.GetForCurrentThread() == null)
-        {
-            var options = new DispatcherQueueOptions
-            {
-                dwSize = Marshal.SizeOf<DispatcherQueueOptions>(),
-                threadType = 2,     // DQTYPE_THREAD_CURRENT
-                apartmentType = 2,  // DQTAT_COM_STA
-            };
-            CreateDispatcherQueueController(options, out var controller);
-            _controller = controller;
-        }
+        EnsureDispatcherQueue();
         return new Windows.UI.Composition.Compositor();
     }
 

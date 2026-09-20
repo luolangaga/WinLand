@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>HardwareMonitor</RootNamespace>
+    <Platforms>x86;x64;ARM64</Platforms>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WinUISDKReferences>false</WinUISDKReferences>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <WindowsPackageType>None</WindowsPackageType>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+
+    <WinIslandPluginsDir Condition="'$(WinIslandPluginsDir)' == ''">$(MSBuildThisFileDirectory)..\..\WinIsland\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\plugins</WinIslandPluginsDir>
+    <PluginTargetDir>$(WinIslandPluginsDir)\hw-monitor</PluginTargetDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.6" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2526" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" PrivateAssets="all" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\WinIsland.Core\WinIsland.Core.csproj" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="plugin.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="README.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="CopyToWinIsland" AfterTargets="Build">
+    <ItemGroup>
+      <PluginArtifacts Include="$(OutDir)**\*.*" />
+      <!-- Windows App SDK / WinUI 运行时由宿主提供，插件包里只保留自己的依赖 -->
+      <PluginArtifacts Remove="$(OutDir)Microsoft.WinUI.dll" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.Windows.SDK.NET.dll" />
+      <PluginArtifacts Remove="$(OutDir)WinRT.Runtime.dll" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.Windows.*.dll" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.Web.WebView2*.dll" />
+      <PluginArtifacts Remove="$(OutDir)WebView2Loader.dll" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.Graphics.*.dll" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.InteractiveExperiences.*.dll" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.ML.OnnxRuntime.dll" />
+      <PluginArtifacts Remove="$(OutDir)System.Numerics.Tensors.dll" />
+      <!-- TraceEvent 的符号解析工具链（用不到，省 2.5MB） -->
+      <PluginArtifacts Remove="$(OutDir)Dia2Lib.dll" />
+      <PluginArtifacts Remove="$(OutDir)TraceReloggerLib.dll" />
+      <PluginArtifacts Remove="$(OutDir)KernelTraceControl.dll" />
+      <PluginArtifacts Remove="$(OutDir)msdia140.dll" />
+      <PluginArtifacts Remove="$(OutDir)amd64\**" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.*.Projection.dll" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.WindowsAppRuntime*" />
+    </ItemGroup>
+    <MakeDir Directories="$(PluginTargetDir)" />
+    <Copy SourceFiles="@(PluginArtifacts)" DestinationFiles="@(PluginArtifacts->'$(PluginTargetDir)\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

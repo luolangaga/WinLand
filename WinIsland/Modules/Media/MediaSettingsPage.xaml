@@ -16,7 +16,7 @@
                 Text="监听 Windows 系统媒体会话，把正在播放的音乐显示在灵动岛上" />
 
             <Border Style="{StaticResource SettingsCardStyle}">
-                <Grid>
+                <Grid ColumnSpacing="16">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
@@ -26,18 +26,22 @@
                         <TextBlock
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="播放音乐时在灵动岛常驻显示，悬停可展开播控" />
+                            Text="播放音乐时在灵动岛常驻显示，悬停可展开播控"
+                            TextWrapping="Wrap" />
                     </StackPanel>
                     <ToggleSwitch
                         x:Name="EnableToggle"
                         Grid.Column="1"
-                        Margin="0,0,-110,0"
+                        MinWidth="0"
+                        VerticalAlignment="Center"
+                        OffContent=""
+                        OnContent=""
                         Toggled="EnableToggle_Toggled" />
                 </Grid>
             </Border>
 
             <Border Style="{StaticResource SettingsCardStyle}">
-                <Grid>
+                <Grid ColumnSpacing="16">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
@@ -47,18 +51,22 @@
                         <TextBlock
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="展开岛体时显示随音乐脉动的彩色光晕背景" />
+                            Text="展开岛体时显示随音乐脉动的彩色光晕背景"
+                            TextWrapping="Wrap" />
                     </StackPanel>
                     <ToggleSwitch
                         x:Name="GlowToggle"
                         Grid.Column="1"
-                        Margin="0,0,-110,0"
+                        MinWidth="0"
+                        VerticalAlignment="Center"
+                        OffContent=""
+                        OnContent=""
                         Toggled="GlowToggle_Toggled" />
                 </Grid>
             </Border>
 
             <Border Style="{StaticResource SettingsCardStyle}">
-                <Grid>
+                <Grid ColumnSpacing="16">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
@@ -68,7 +76,8 @@
                         <TextBlock
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="数值越高越优先显示在灵动岛上，默认 100" />
+                            Text="数值越高越优先显示在灵动岛上，默认 100"
+                            TextWrapping="Wrap" />
                     </StackPanel>
                     <Slider
                         x:Name="PrioritySlider"
@@ -77,6 +86,7 @@
                         Maximum="200"
                         Minimum="0"
                         StepFrequency="10"
+                        VerticalAlignment="Center"
                         ValueChanged="PrioritySlider_ValueChanged" />
                 </Grid>
             </Border>

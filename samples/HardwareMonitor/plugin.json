@@ -1,0 +1,13 @@
+{
+  "id": "hw-monitor",
+  "name": "硬件监控",
+  "version": "1.0.0",
+  "description": "常驻硬件信息：小岛显示 CPU/GPU/网络/帧率，大岛显示前台窗口 FPS、CPU、GPU 与上下传速度",
+  "author": "WinIsland",
+  "icon_glyph": "\uE950",
+  "entry_dll": "HardwareMonitor.dll",
+  "api_version": 2,
+  "min_host_version": "2.0.0",
+  "license": "MIT",
+  "tags": ["hardware", "monitor", "fps", "network"]
+}

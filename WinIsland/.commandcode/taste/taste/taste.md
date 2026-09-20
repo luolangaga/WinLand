@@ -1,0 +1,17 @@
+# Taste
+- Writes requests in Simplified Chinese and expects Chinese responses; UI copy/settings text should be in Chinese. Confidence: 0.9
+- Expects smooth navigation/page-transition animations (e.g., a WinUI `Frame` with `NavigationThemeTransition`) rather than abrupt content swaps when switching pages. Confidence: 0.6
+- Wants settings content to stay centered and stretch to fill the available width when the window is maximized — layout must scale cleanly instead of drifting/cropping or being propped up by negative-margin hacks. Confidence: 0.6
+- Works from mainland China: raw.githubusercontent.com is often unreachable, so network-backed features must degrade gracefully — prefer GitHub as the single source of truth but with automatic fallback to domestic mirrors (GitCode) or CDNs (jsDelivr), and let the source be overridden in settings. Confidence: 0.75
+- Expects the remote access layer to be hardened for that environment: per-source timeouts (a blocked host must not hang a refresh), remember the last successful source, and fall back to a local cache when everything fails. Confidence: 0.6
+- Values being able to point a network-backed feature at a local directory/offline source for development and testing. Confidence: 0.55
+- Cares about network efficiency: fetch one manifest/listing file per refresh (packing list, metadata and icons into it) rather than issuing per-item requests; and skip a re-fetch when a cached copy is fresh. Confidence: 0.7
+- Gives a high-level spec and explicit authority over the rest ("剩下的你觉得咋样好就咋样来") — once the hard requirements are met, decide open design details autonomously and summarize the choice instead of asking. Confidence: 0.6
+- Wants work verified end to end against the real deployed artifacts/URLs, not just compiled locally. Confidence: 0.5
+- Expects plugin/detail descriptions (README-style content) to be rendered as rich Markdown — headings, lists, tables, fenced code blocks, quotes, inline styles and links — not shown as raw text. Confidence: 0.6
+- Expects the first view of network-backed content to be correct without a manual refresh: cached data must be scoped to the source/configuration it came from, so stale or foreign-source cache entries get discarded instead of displayed. Confidence: 0.6
+- Expects test/dev runs to stay isolated from the user's real app state (separate temp cache/settings directories) — dislikes discovering test fixtures in the live data. Confidence: 0.6
+- For UI work, values visual verification (render a preview and inspect/screenshot the actual output) rather than trusting a successful compile. Confidence: 0.6
+- Expects text/content in dialogs and cards to stay inside its container: long values (hashes, URLs, timestamps, long names, tag lists) must wrap or reflow rather than overflow or be clipped — including in popups whose width is bounded by the framework. Confidence: 0.65
+- Runs a 200%-scaled display (RasterizationScale = 2): hardcoded pixel widths look fine at 1x but visibly overflow for them, so layout bugs must be vetted at high DPI. Confidence: 0.6
+- Prefers not to add third-party UI packages (e.g., Community Toolkit) to fill small layout gaps — write the minimal helper in-repo instead. Confidence: 0.55

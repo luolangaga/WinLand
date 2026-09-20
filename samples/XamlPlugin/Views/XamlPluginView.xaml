@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="XamlPlugin.Views.XamlPluginView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <StackPanel
+        Orientation="Horizontal"
+        Padding="16,0,16,0"
+        Spacing="12"
+        VerticalAlignment="Center">
+        <Border
+            x:Name="Dot"
+            Width="12"
+            Height="12"
+            Background="#8B5CF6"
+            CornerRadius="6"
+            VerticalAlignment="Center" />
+        <StackPanel
+            x:Name="Details"
+            Spacing="2"
+            VerticalAlignment="Center">
+            <TextBlock
+                x:Name="TitleText"
+                FontSize="14"
+                FontWeight="SemiBold"
+                Foreground="White"
+                Text="XAML 插件" />
+            <TextBlock
+                x:Name="SubText"
+                FontSize="12"
+                Foreground="#B0FFFFFF"
+                Opacity="0"
+                Text="来自插件程序集的 XAML 视图" />
+        </StackPanel>
+    </StackPanel>
+</UserControl>

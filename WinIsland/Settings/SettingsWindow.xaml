@@ -32,14 +32,13 @@
             OpenPaneLength="220"
             PaneDisplayMode="Left"
             SelectionChanged="Nav_SelectionChanged">
-            <ScrollViewer>
-                <ContentPresenter
-                    x:Name="PageHost"
-                    MaxWidth="900"
-                    Margin="36,24,36,36"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Top" />
-            </ScrollViewer>
+            <Frame x:Name="ContentFrame" IsNavigationStackEnabled="False">
+                <Frame.ContentTransitions>
+                    <TransitionCollection>
+                        <NavigationThemeTransition />
+                    </TransitionCollection>
+                </Frame.ContentTransitions>
+            </Frame>
         </NavigationView>
     </Grid>
 </Window>

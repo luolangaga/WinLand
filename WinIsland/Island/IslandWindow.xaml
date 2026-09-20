@@ -9,16 +9,25 @@
     mc:Ignorable="d">
 
     <Grid x:Name="RootGrid" Background="Transparent" RequestedTheme="Dark">
-        <StackPanel
+        <!-- 岛体栈：两行 Auto 行，行序按 island.position 运行时切换。
+             顶部模式：主岛第 0 行、队列第 1 行（向下排列）；
+             底部模式：队列第 0 行、主岛第 1 行（向上排列）。
+             用改行号而不是重挂子元素，避免 IslandRoot 被 Unloaded/Loaded 导致内容重挂。 -->
+        <Grid
             x:Name="IslandStack"
             Margin="0,24,0,0"
             HorizontalAlignment="Center"
             VerticalAlignment="Top"
-            Spacing="8"
+            RowSpacing="8"
             PointerEntered="IslandStack_PointerEntered"
             PointerExited="IslandStack_PointerExited">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
             <Border
                 x:Name="IslandRoot"
+                Grid.Row="0"
                 HorizontalAlignment="Center"
                 Background="#FF000000"
                 CornerRadius="17"
@@ -29,9 +38,10 @@
             </Border>
             <StackPanel
                 x:Name="QueuePanel"
+                Grid.Row="1"
                 HorizontalAlignment="Center"
                 Spacing="6"
                 Visibility="Collapsed" />
-        </StackPanel>
+        </Grid>
     </Grid>
 </Window>

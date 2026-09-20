@@ -254,11 +254,200 @@ internal static partial class Win32
         RemoveDwmBorder(hwnd);
     }
 
-    /// <summary>确保窗口处于 TOPMOST 层且可见（不抢焦点）。</summary>
-    public static void EnsureTopmost(nint hwnd)
+    /// <summary>
+    /// 只在窗口真的被压住时重新置顶，返回压住它的窗口描述（null = 没被压住、什么都没做）。
+    /// 判定「被压住」的唯一标准是：岛体矩形上方存在任意可见且与其相交的窗口 ——
+    /// 任务栏、开始菜单、搜索浮层都是置顶窗口，谁最后断言谁在上层。
+    /// 只检查「任务栏是否在我上面」是不够的（那些浮层不是任务栏，同样会把岛盖掉）。
+    /// WS_EX_TOPMOST 位本身不会清除，所以不能只看自己的样式位。
+    /// </summary>
+    public static string? EnsureTopmost(nint hwnd, RECT islandOnScreen)
     {
+        if (FindCoverer(hwnd, islandOnScreen) is not { } coverer) return null;
+
         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        return coverer;
+    }
+
+    /// <summary>岛体上方第一个「可见且与其相交」的窗口（类名 + 矩形）；没有则返回 null。</summary>
+    private static string? FindCoverer(nint hwnd, RECT island)
+    {
+        for (var cur = GetWindow(hwnd, GW_HWNDPREV); cur != nint.Zero; cur = GetWindow(cur, GW_HWNDPREV))
+        {
+            if (!IsWindowVisible(cur)) continue;
+            if (!GetWindowRect(cur, out var rect)) continue;
+
+            // 与岛体不相交的窗口（例如各种 1x1 置顶辅助窗口）不算被压住
+            if (MinOverlap(rect, island) <= 0) continue;
+
+            var name = new char[64];
+            int len = GetClassName(cur, name, name.Length);
+            string cls = len > 0 ? new string(name, 0, len) : "(未知类)";
+            return $"{cls} {rect.Left},{rect.Top} {rect.Right - rect.Left}x{rect.Bottom - rect.Top}";
+        }
+        return null;
+    }
+
+    // ---- 前台窗口变化监听：任务栏/开始菜单/搜索抬层时立刻重升岛（轮询只是兜底）----
+
+    private const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+    private const uint WINEVENT_OUTOFCONTEXT = 0x0000;
+    private const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSG
+    {
+        public nint hwnd;
+        public uint message;
+        public nuint wParam;
+        public nint lParam;
+        public uint time;
+        public POINT pt;
+        public uint lPrivate;
+    }
+
+    private delegate void WinEventProc(nint hook, uint eventId, nint hwnd, int idObject, int idChild, uint threadId, uint time);
+
+    [LibraryImport("user32.dll")]
+    private static partial nint SetWinEventHook(uint eventMin, uint eventMax, nint hmodWinEventProc,
+        WinEventProc proc, uint idProcess, uint idThread, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern int GetMessage(out MSG msg, nint hWnd, uint min, uint max);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool TranslateMessage(ref MSG msg);
+
+    [DllImport("user32.dll")]
+    private static extern nint DispatchMessage(ref MSG msg);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetClassNameW")]
+    private static extern int GetClassName(nint hWnd, [Out] char[] lpClassName, int nMaxCount);
+
+    // 钩子委托必须存活（静态字段），否则会被 GC 回收导致回调丢失
+    private static readonly WinEventProc _foregroundProc = OnForegroundEvent;
+    private static Action? _foregroundHandler;
+
+    /// <summary>
+    /// 安装「前台窗口变化」监听。WINEVENT_OUTOFCONTEXT 要求安装线程自己跑消息泵，
+    /// 所以这里起一个后台线程专门 GetMessage。回调在钩子线程上执行，调用方负责切回 UI 线程。
+    /// 只安装一次。用途见 <see cref="EnsureTopmost"/>。
+    /// </summary>
+    public static void InstallForegroundWatcher(Action onForegroundChanged)
+    {
+        if (_foregroundHandler != null) return;
+        _foregroundHandler = onForegroundChanged;
+
+        var thread = new Thread(() =>
+        {
+            SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nint.Zero, _foregroundProc, 0, 0,
+                WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+
+            while (GetMessage(out var msg, nint.Zero, 0, 0) > 0)
+            {
+                TranslateMessage(ref msg);
+                DispatchMessage(ref msg);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "WinIsland.ForegroundWatch",
+        };
+        thread.Start();
+    }
+
+    private static void OnForegroundEvent(nint hook, uint eventId, nint hwnd, int idObject, int idChild, uint threadId, uint time)
+    {
+        try
+        {
+            _foregroundHandler?.Invoke();
+        }
+        catch
+        {
+            // 钩子线程上绝不能抛异常
+        }
+    }
+
+    // ---- 任务栏条带：底部模式下把岛嵌进任务栏条带 ----
+
+    /// <summary>自动隐藏/全屏收起时任务栏滑出屏幕，但仍留 ~2px 缝隙，所以「在屏幕上」必须做真实交叠测试。</summary>
+    public const int SliverPx = 8;
+
+    /// <summary>主任务栏条带：停靠矩形（物理像素）+ 是否真的显示在屏幕上 + 托盘区左边界（0 = 没量到）。</summary>
+    public readonly record struct TaskbarStrip(RECT Docked, bool Visible, int TrayLeft);
+
+    private const uint ABM_GETTASKBARPOS = 5;
+    private const uint GW_HWNDPREV = 3;
+
+    [LibraryImport("user32.dll", EntryPoint = "FindWindowW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial nint FindWindow(string? lpClassName, string? lpWindowName);
+
+    [LibraryImport("user32.dll", EntryPoint = "FindWindowExW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial nint FindWindowEx(nint hWndParent, nint hWndChildAfter, string? lpszClass, string? lpszWindow);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetWindowRect(nint hWnd, out RECT lpRect);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindowVisible(nint hWnd);
+
+    [LibraryImport("user32.dll")]
+    private static partial nint GetWindow(nint hWnd, uint uCmd);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct APPBARDATA
+    {
+        public uint cbSize;
+        public nint hWnd;
+        public uint uCallbackMessage;
+        public uint uEdge;
+        public RECT rc;
+        public nint lParam;
+    }
+
+    [LibraryImport("shell32.dll")]
+    private static partial nint SHAppBarMessage(uint dwMessage, ref APPBARDATA pData);
+
+    /// <summary>
+    /// 主任务栏条带。<paramref name="display"/> 为主显示器外框（物理像素，用于判断任务栏是否真的在屏幕上）。
+    /// 停靠矩形取 ABM_GETTASKBARPOS —— 它在任务栏自动隐藏时仍报告停靠位置，正是要嵌入的位置；
+    /// 可见性另算：自动隐藏/全屏收起时任务栏被移出屏幕，只留一道缝隙。
+    /// 取不到（非 explorer 外壳、调用失败）返回 null，调用方退回屏幕外框。
+    /// </summary>
+    public static TaskbarStrip? GetTaskbarStrip(RECT display)
+    {
+        var tray = FindWindow("Shell_TrayWnd", null);
+        if (tray == nint.Zero || !GetWindowRect(tray, out var live)) return null;
+
+        bool visible = IsWindowVisible(tray) && MinOverlap(live, display) >= SliverPx;
+
+        // 托盘区（TrayNotifyWnd）的左边界：靠右落点据此避开托盘/时钟，实测比估计可靠；量不到返回 0
+        int trayLeft = 0;
+        var notify = FindWindowEx(tray, nint.Zero, "TrayNotifyWnd", null);
+        if (notify != nint.Zero && GetWindowRect(notify, out var notifyRect) && notifyRect.Right > notifyRect.Left)
+            trayLeft = notifyRect.Left;
+
+        return new TaskbarStrip(TryGetDockedTaskbarRect() ?? live, visible, trayLeft);
+    }
+
+    /// <summary>主任务栏窗口句柄（Shell_TrayWnd）；取不到返回 0。UIA 枚举任务栏元素时要用。</summary>
+    public static nint GetTaskbarWindow() => FindWindow("Shell_TrayWnd", null);
+
+    /// <summary>两个矩形的较小重叠边（负数表示不重叠）。</summary>
+    private static int MinOverlap(RECT a, RECT b)
+        => Math.Min(
+            Math.Min(a.Right, b.Right) - Math.Max(a.Left, b.Left),
+            Math.Min(a.Bottom, b.Bottom) - Math.Max(a.Top, b.Top));
+
+    private static RECT? TryGetDockedTaskbarRect()
+    {
+        var data = new APPBARDATA { cbSize = (uint)Marshal.SizeOf<APPBARDATA>() };
+        if (SHAppBarMessage(ABM_GETTASKBARPOS, ref data) == nint.Zero) return null;
+        return data.rc;
     }
 
     // ---- 样式守卫：AppWindow/presenter 会反复把 WS_DLGFRAME/WS_SYSMENU 写回 GWL_STYLE（白描边），

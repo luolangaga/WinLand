@@ -16,7 +16,7 @@
             Text="监听充电状态，绿色填充灵动岛代表当前电量，悬停展开查看详情" />
 
         <Border Style="{StaticResource SettingsCardStyle}">
-            <Grid>
+            <Grid ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
@@ -26,12 +26,16 @@
                     <TextBlock
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="充电时在灵动岛常驻显示，悬停可展开详情" />
+                        Text="充电时在灵动岛常驻显示，悬停可展开详情"
+                        TextWrapping="Wrap" />
                 </StackPanel>
                 <ToggleSwitch
                     x:Name="EnableToggle"
                     Grid.Column="1"
-                    Margin="0,0,-110,0"
+                    MinWidth="0"
+                    VerticalAlignment="Center"
+                    OffContent=""
+                    OnContent=""
                     Toggled="EnableToggle_Toggled" />
             </Grid>
         </Border>

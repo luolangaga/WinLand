@@ -10,11 +10,13 @@ namespace WinIsland.Settings;
 public sealed partial class PluginManagerPage : UserControl
 {
     private readonly PluginHost _plugins;
+    private readonly SettingsService _settings;
     private bool _busy;
 
-    public PluginManagerPage(PluginHost plugins)
+    public PluginManagerPage(PluginHost plugins, SettingsService settings)
     {
         _plugins = plugins;
+        _settings = settings;
         InitializeComponent();
 
         PluginsPathText.Text = plugins.PluginsDirectory;
@@ -135,12 +137,18 @@ public sealed partial class PluginManagerPage : UserControl
         };
         Grid.SetColumn(actions, 2);
 
+        actions.Children.Add(BuildPriorityBox(plugin));
+
         var toggle = new ToggleSwitch
         {
             IsOn = isActive,
             IsEnabled = !_busy && plugin.Manifest != null,
+            MinWidth = 0,
+            OffContent = "",
+            OnContent = "",
             VerticalAlignment = VerticalAlignment.Center,
         };
+        ToolTipService.SetToolTip(toggle, "启用 / 禁用该插件");
         toggle.Toggled += async (_, _) =>
         {
             var enable = toggle.IsOn;
@@ -174,6 +182,56 @@ public sealed partial class PluginManagerPage : UserControl
             Style = (Style)Application.Current.Resources["SettingsCardStyle"],
             Child = root,
         };
+    }
+
+    /// <summary>
+    /// 岛上优先级：写宿主键 <c>plugin.&lt;id&gt;.priority</c>（覆盖插件自己声明的优先级），留空表示用插件默认值。
+    /// </summary>
+    private UIElement BuildPriorityBox(PluginInfo plugin)
+    {
+        var key = $"plugin.{plugin.Id}.priority";
+        var box = new NumberBox
+        {
+            Value = _settings.Get<double?>(key, null) ?? double.NaN,
+            PlaceholderText = "默认",
+            Minimum = 0,
+            Maximum = 999,
+            SmallChange = 5,
+            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
+            Width = 104,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsEnabled = !_busy,
+        };
+        ToolTipService.SetToolTip(box, "岛上优先级：数值越大越靠前（小岛显示优先级最高的活动）；留空使用插件默认值");
+
+        box.ValueChanged += (_, args) =>
+        {
+            if (_busy) return;
+            if (double.IsNaN(args.NewValue))
+            {
+                _settings.Remove(key);
+            }
+            else
+            {
+                _settings.Set(key, args.NewValue);
+            }
+        };
+
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 4,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        row.Children.Add(new TextBlock
+        {
+            Text = "优先级",
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = ThemeBrush("TextFillColorSecondaryBrush", 0x90, 0x90, 0x95),
+        });
+        row.Children.Add(box);
+        return row;
     }
 
     private UIElement BuildIcon(PluginInfo plugin, bool isActive, bool isFaulted)

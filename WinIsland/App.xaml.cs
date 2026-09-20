@@ -1,8 +1,8 @@
 ﻿using Microsoft.UI.Xaml;
 using WinIsland.Core;
+using WinIsland.Core.Marketplace;
 using WinIsland.Core.Plugins;
 using WinIsland.Island;
-using WinIsland.Modules.AiMonitor;
 using WinIsland.Modules.Battery;
 using WinIsland.Modules.Media;
 using WinIsland.Modules.Messaging;
@@ -16,9 +16,12 @@ public partial class App : Application
     private IslandWindow _island = null!;
     private IslandService _service = null!;
     private PluginHost _plugins = null!;
+    private MarketplaceService _marketplace = null!;
     private readonly PluginLogService _logs;
     private TrayIcon? _tray;
     internal SettingsWindow? _settingsWindow;
+    private TaskbarHookHost _taskbarHook = null!;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer _hookWatchdog = null!;
     private bool _exiting;
 
     public App()
@@ -55,6 +58,26 @@ public partial class App : Application
             _service.SettingsOpenRequested += OpenSettingsWindow;
 
             _plugins = new PluginHost(_service, _settings, _island.DispatcherQueue, _logs);
+            _marketplace = new MarketplaceService(_settings, _logs.Host);
+
+            // 任务栏嵌入 hook（实验性）：注入/探活/失败自动回滚，没开或没有 DLL 时什么也不做
+            _taskbarHook = new TaskbarHookHost(_settings, _logs.Host, _island.DispatcherQueue);
+            _hookWatchdog = _island.DispatcherQueue.CreateTimer();
+            _hookWatchdog.Interval = TimeSpan.FromSeconds(1);
+            _hookWatchdog.IsRepeating = true;
+            _hookWatchdog.Tick += (_, _) =>
+            {
+                try
+                {
+                    _taskbarHook.Tick();
+                }
+                catch (Exception ex)
+                {
+                    // WinUI 定时器回调里抛异常 = stowed exception = 进程直接死，必须兜住
+                    _logs.Host.Error("任务栏 hook 看门狗回调异常（已忽略）", ex);
+                }
+            };
+            _hookWatchdog.Start();
 
             _island.ShowIsland();
 
@@ -72,9 +95,6 @@ public partial class App : Application
                 BuiltInManifest("battery", "充电监控", "\uE857", "充电状态与实时功率"),
                 () => new BatteryPlugin());
             _plugins.RegisterBuiltIn(
-                BuiltInManifest("aimonitor", "AI 任务监控", "\uE965", "通过本地 HTTP 接口接收 AI 编码任务状态"),
-                () => new AiMonitorPlugin());
-            _plugins.RegisterBuiltIn(
                 BuiltInManifest("messenger", "发送消息", "\uE724", "手动发送灵动岛消息与自定义内容"),
                 () => new MessagePlugin());
 
@@ -83,7 +103,9 @@ public partial class App : Application
             _service.AddSettingsPage(new SettingsPageDescriptor(
                 "general", "通用", "\uE713", () => new GeneralSettingsPage(_settings), 0));
             _service.AddSettingsPage(new SettingsPageDescriptor(
-                "plugins", "插件管理", "\uE712", () => new PluginManagerPage(_plugins), 1000));
+                "marketplace", "插件市场", "\uE719", () => new MarketplacePage(_marketplace, _plugins), 900));
+            _service.AddSettingsPage(new SettingsPageDescriptor(
+                "plugins", "插件管理", "\uE712", () => new PluginManagerPage(_plugins, _settings), 1000));
 
             _service.SendMessage(new IslandMessage
             {
@@ -131,13 +153,22 @@ public partial class App : Application
 
     private void OpenSettingsWindow(string? pageId)
     {
-        if (_settingsWindow == null)
+        try
         {
-            _settingsWindow = new SettingsWindow(_service, _settings);
-            _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+            if (_settingsWindow == null)
+            {
+                _settingsWindow = new SettingsWindow(_service, _settings);
+                _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+            }
+            if (pageId != null) _settingsWindow.SelectPage(pageId);
+            _settingsWindow.Activate();
         }
-        if (pageId != null) _settingsWindow.SelectPage(pageId);
-        _settingsWindow.Activate();
+        catch (Exception ex)
+        {
+            // 以前这里是静默失败：窗口建好了却不可见，日志里什么都看不到
+            _settingsWindow = null;
+            _logs.Host.Error("打开设置窗口失败", ex);
+        }
     }
 
     private async void ExitApp()
@@ -148,6 +179,8 @@ public partial class App : Application
         try
         {
             _tray?.Dispose();
+            _hookWatchdog?.Stop();
+            _taskbarHook?.Dispose();   // 请求 hook 移除已插入元素并自行 detach
             await _plugins.ShutdownAllAsync();
             _plugins.Dispose();
         }

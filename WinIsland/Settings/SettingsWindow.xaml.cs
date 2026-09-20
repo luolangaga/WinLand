@@ -63,7 +63,7 @@ public sealed partial class SettingsWindow : Window
         }
         else
         {
-            PageHost.Content = null;
+            ContentFrame.Content = null;
         }
     }
 
@@ -79,9 +79,9 @@ public sealed partial class SettingsWindow : Window
     {
         if (args.SelectedItem is not NavigationViewItem item || item.Tag is not string id) return;
         var page = _service.SettingsPages.FirstOrDefault(p => p.Id == id);
-        if (page != null)
-        {
-            PageHost.Content = page.Factory();
-        }
+        if (page == null) return;
+
+        // 页面交给 Frame 承载，切换时播放 NavigationThemeTransition（淡入 + 轻微位移）
+        ContentFrame.Navigate(typeof(SettingsPageHost), page.Factory());
     }
 }
