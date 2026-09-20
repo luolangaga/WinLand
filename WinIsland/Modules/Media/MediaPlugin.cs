@@ -2,36 +2,34 @@ using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.ApplicationModel;
 using Windows.Management.Deployment;
 using Windows.Media.Control;
-using Windows.Storage.Streams;
 using WinIsland.Core;
 
 namespace WinIsland.Modules.Media;
 
-public sealed class MediaModule : IIslandModule
+public sealed class MediaPlugin : IslandPluginBase
 {
-    public string Id => "media";
-    public string DisplayName => "正在播放";
+    private const int DefaultPriority = 100;
 
-    private IDynamicIslandApi _api = null!;
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private GlobalSystemMediaTransportControlsSession? _session;
     private readonly List<GlobalSystemMediaTransportControlsSession> _sessions = new();
 
     private MediaViewModel _vm = null!;
-    private IslandLiveContent _content = null!;
+    private MediaIslandView _islandView = null!;
     private AudioLevelMonitor? _levelMonitor;
+    private IslandLiveContent _content = null!;
     private bool _enabled;
-    private bool _liveShown;
+    private int _priority = DefaultPriority;
     private int _refreshVersion;
     private string? _thumbTrackKey;
     private string? _lastSourceAppId;
 
     public string StatusText { get; private set; } = "当前没有活动的媒体会话";
 
-    public async Task InitializeAsync(IDynamicIslandApi api)
+    protected override async Task OnInitializeAsync()
     {
-        _api = api;
-        _enabled = api.Settings.Get("media.enabled", true);
+        _enabled = Settings.Get("enabled", true);
+        _priority = Settings.Get("priority", DefaultPriority);
 
         _vm = new MediaViewModel
         {
@@ -41,85 +39,99 @@ public sealed class MediaModule : IIslandModule
             SwitchToNextSession = SwitchToNextSession,
             SwitchToPrevSession = SwitchToPrevSession,
             RefreshTimeline = RefreshTimeline,
-            GlowEnabled = api.Settings.Get("media.glow", true),
+            GlowEnabled = Settings.Get("glow", true),
         };
 
         _levelMonitor = new AudioLevelMonitor();
+        _islandView = new MediaIslandView(_vm, _levelMonitor);
+        _content = BuildContent();
 
-        _content = new IslandLiveContent
+        Context.Island.AddSettingsPage(new SettingsPageDescriptor(
+            "media", Manifest.Name, "\uE8D6", () => new MediaSettingsPage(Context, this), 10));
+
+        Context.OnSettingsChanged("enabled", () =>
         {
-            Priority = 100,
-            OwnerLabel = "正在播放",
-            OwnerGlyph = "\uE8D6",
-            OwnerAccent = Windows.UI.Color.FromArgb(255, 255, 45, 85),
-            MorphView = new MediaIslandView(_vm, _levelMonitor),
-            CompactSize = new Windows.Foundation.Size(250, 40),
-            ExpandedSize = new Windows.Foundation.Size(420, 148),
-            OnTap = ActivateSourceApp,
-        };
-
-        api.AddSettingsPage(new SettingsPageDescriptor(
-            "media", DisplayName, "\uE8D6", () => new MediaSettingsPage(_api, this)));
-
-        api.Settings.Changed += key =>
+            _enabled = Settings.Get("enabled", true);
+            _ = RefreshAsync();
+        });
+        Context.OnSettingsChanged("glow", () =>
         {
-            if (key == "media.enabled")
-            {
-                _enabled = _api.Settings.Get("media.enabled", true);
-                RunOnUI(() => _ = RefreshAsync());
-            }
-            else if (key == "media.glow")
-            {
-                _vm.GlowEnabled = _api.Settings.Get("media.glow", true);
-                UpdateLevelMonitor();
-            }
-        };
+            _vm.GlowEnabled = Settings.Get("glow", true);
+            UpdateLevelMonitor();
+        });
+        Context.OnSettingsChanged("priority", () =>
+        {
+            _priority = Settings.Get("priority", DefaultPriority);
+            _content = BuildContent();
+            UpdateContent(_content);
+        });
 
         try
         {
             _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
-            _manager.CurrentSessionChanged += (_, _) => RunOnUI(OnCurrentSessionChanged);
-            _manager.SessionsChanged += (_, _) => RunOnUI(OnSessionsChanged);
+            _manager.CurrentSessionChanged += OnManagerCurrentSessionChanged;
+            _manager.SessionsChanged += OnManagerSessionsChanged;
             OnSessionsChanged();
             OnCurrentSessionChanged();
         }
-        catch
+        catch (Exception ex)
         {
             StatusText = "无法访问系统媒体会话";
+            Log.Warn($"无法访问系统媒体会话：{ex.Message}");
         }
     }
 
-    public Task ShutdownAsync()
+    protected override Task OnShutdownAsync()
     {
+        if (_manager != null)
+        {
+            _manager.CurrentSessionChanged -= OnManagerCurrentSessionChanged;
+            _manager.SessionsChanged -= OnManagerSessionsChanged;
+            _manager = null;
+        }
+
         DetachSession();
+        _sessions.Clear();
         _levelMonitor?.Stop();
         _levelMonitor?.Dispose();
         _levelMonitor = null;
-        _manager = null;
+        SetContent(null);
         return Task.CompletedTask;
     }
 
-    private void RunOnUI(Action action)
+    private IslandLiveContent BuildContent() => new()
     {
-        if (_api.Dispatcher.HasThreadAccess)
-        {
-            action();
-        }
-        else
-        {
-            _api.Dispatcher.TryEnqueue(() => action());
-        }
-    }
+        Priority = _priority,
+        OwnerLabel = "正在播放",
+        OwnerGlyph = "\uE8D6",
+        OwnerAccent = Windows.UI.Color.FromArgb(255, 255, 45, 85),
+        MorphView = _islandView,
+        CompactSize = new Windows.Foundation.Size(250, 40),
+        ExpandedSize = new Windows.Foundation.Size(420, 148),
+        OnTap = ActivateSourceApp,
+    };
+
+    private void SetLive(bool show) => SetContent(show ? _content : null);
+
+    private void OnManagerCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, CurrentSessionChangedEventArgs args)
+        => RunOnUI(OnCurrentSessionChanged);
+
+    private void OnManagerSessionsChanged(GlobalSystemMediaTransportControlsSessionManager sender, SessionsChangedEventArgs args)
+        => RunOnUI(OnSessionsChanged);
 
     private void OnSessionsChanged()
     {
         _sessions.Clear();
         try
         {
-            foreach (var s in _manager?.GetSessions() ?? Array.Empty<GlobalSystemMediaTransportControlsSession>())
-                _sessions.Add(s);
+            foreach (var session in _manager?.GetSessions() ?? Array.Empty<GlobalSystemMediaTransportControlsSession>())
+            {
+                _sessions.Add(session);
+            }
         }
-        catch { }
+        catch
+        {
+        }
 
         _vm.HasMultipleSessions = _sessions.Count > 1;
         _vm.SessionCount = _sessions.Count;
@@ -133,39 +145,40 @@ public sealed class MediaModule : IIslandModule
 
         DetachSession();
         _session = session;
-        if (_session != null)
-        {
-            _session.MediaPropertiesChanged += OnMediaPropertiesChanged;
-            _session.PlaybackInfoChanged += OnPlaybackInfoChanged;
-            _session.TimelinePropertiesChanged += OnTimelinePropertiesChanged;
-        }
+        AttachSession();
         UpdateSessionIndex();
         _ = RefreshAsync();
+    }
+
+    private void AttachSession()
+    {
+        if (_session == null) return;
+        _session.MediaPropertiesChanged += OnMediaPropertiesChanged;
+        _session.PlaybackInfoChanged += OnPlaybackInfoChanged;
+        _session.TimelinePropertiesChanged += OnTimelinePropertiesChanged;
     }
 
     private void UpdateSessionIndex()
     {
         if (_session != null)
         {
-            int idx = _sessions.IndexOf(_session);
-            _vm.SessionIndex = idx >= 0 ? idx : 0;
+            var index = _sessions.IndexOf(_session);
+            _vm.SessionIndex = index >= 0 ? index : 0;
         }
     }
 
     private void SwitchToNextSession()
     {
         if (_sessions.Count <= 1) return;
-        int idx = _vm.SessionIndex;
-        int next = (idx + 1) % _sessions.Count;
+        var next = (_vm.SessionIndex + 1) % _sessions.Count;
         RunOnUI(() => SwitchToSession(next));
     }
 
     private void SwitchToPrevSession()
     {
         if (_sessions.Count <= 1) return;
-        int idx = _vm.SessionIndex;
-        int prev = (idx - 1 + _sessions.Count) % _sessions.Count;
-        RunOnUI(() => SwitchToSession(prev));
+        var previous = (_vm.SessionIndex - 1 + _sessions.Count) % _sessions.Count;
+        RunOnUI(() => SwitchToSession(previous));
     }
 
     private void SwitchToSession(int index)
@@ -176,12 +189,7 @@ public sealed class MediaModule : IIslandModule
 
         DetachSession();
         _session = target;
-        if (_session != null)
-        {
-            _session.MediaPropertiesChanged += OnMediaPropertiesChanged;
-            _session.PlaybackInfoChanged += OnPlaybackInfoChanged;
-            _session.TimelinePropertiesChanged += OnTimelinePropertiesChanged;
-        }
+        AttachSession();
         _vm.SessionIndex = index;
         _lastSourceAppId = null;
         _ = RefreshAsync();
@@ -196,17 +204,20 @@ public sealed class MediaModule : IIslandModule
             _session.PlaybackInfoChanged -= OnPlaybackInfoChanged;
             _session.TimelinePropertiesChanged -= OnTimelinePropertiesChanged;
         }
-        catch { }
+        catch
+        {
+        }
+
         _session = null;
     }
 
-    private void OnMediaPropertiesChanged(GlobalSystemMediaTransportControlsSession sender, object args)
+    private void OnMediaPropertiesChanged(GlobalSystemMediaTransportControlsSession sender, MediaPropertiesChangedEventArgs args)
         => RunOnUI(() => _ = RefreshAsync());
 
-    private void OnPlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender, object args)
+    private void OnPlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender, PlaybackInfoChangedEventArgs args)
         => RunOnUI(RefreshPlaybackOnly);
 
-    private void OnTimelinePropertiesChanged(GlobalSystemMediaTransportControlsSession sender, object args)
+    private void OnTimelinePropertiesChanged(GlobalSystemMediaTransportControlsSession sender, TimelinePropertiesChangedEventArgs args)
         => RunOnUI(RefreshTimeline);
 
     private void RefreshTimeline()
@@ -238,14 +249,13 @@ public sealed class MediaModule : IIslandModule
         try
         {
             var status = session.GetPlaybackInfo().PlaybackStatus;
-            bool active = status is GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
+            var active = status is GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
                 or GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused;
-            if (active != _liveShown)
+            if (!active)
             {
                 _ = RefreshAsync();
                 return;
             }
-            if (!active) return;
 
             _vm.IsPlaying = status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
             UpdateLevelMonitor();
@@ -274,7 +284,7 @@ public sealed class MediaModule : IIslandModule
         try
         {
             var status = session.GetPlaybackInfo().PlaybackStatus;
-            bool active = status is GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
+            var active = status is GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
                 or GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused;
             if (!active)
             {
@@ -329,22 +339,15 @@ public sealed class MediaModule : IIslandModule
         {
             using var stream = await props.Thumbnail.OpenReadAsync();
             if (version != _refreshVersion) return;
-            var bmp = new BitmapImage();
-            await bmp.SetSourceAsync(stream);
+            var bitmap = new BitmapImage();
+            await bitmap.SetSourceAsync(stream);
             if (version != _refreshVersion) return;
-            _vm.Thumbnail = bmp;
+            _vm.Thumbnail = bitmap;
         }
         catch
         {
             if (version == _refreshVersion) _vm.Thumbnail = null;
         }
-    }
-
-    private void SetLive(bool show)
-    {
-        if (show == _liveShown) return;
-        _liveShown = show;
-        _api.SetLiveContent(Id, show ? _content : null);
     }
 
     private void ActivateSourceApp()
@@ -369,7 +372,9 @@ public sealed class MediaModule : IIslandModule
                     });
                 }
             }
-            catch { }
+            catch
+            {
+            }
         }
     }
 
@@ -385,34 +390,41 @@ public sealed class MediaModule : IIslandModule
         try
         {
             var familyName = sourceAppUserModelId.Split('!')[0];
-            var mgr = new PackageManager();
-            var pkgs = mgr.FindPackagesForUser("");
-            foreach (var pkg in pkgs)
+            var packageManager = new PackageManager();
+            foreach (var package in packageManager.FindPackagesForUser(""))
             {
-                if (pkg.Id.FamilyName != familyName) continue;
-                var displayName = pkg.DisplayName;
+                if (package.Id.FamilyName != familyName) continue;
+                var displayName = package.DisplayName;
                 if (string.IsNullOrEmpty(displayName))
+                {
                     displayName = LookupKnownApp(PrettifyAumid(sourceAppUserModelId));
+                }
+
                 _vm.SourceAppName = displayName;
                 try
                 {
-                    var file = await Windows.Storage.StorageFile.GetFileFromApplicationUriAsync(pkg.Logo);
+                    var file = await Windows.Storage.StorageFile.GetFileFromApplicationUriAsync(package.Logo);
                     using var stream = await file.OpenReadAsync();
-                    var bmp = new BitmapImage();
-                    await bmp.SetSourceAsync(stream);
-                    _vm.SourceAppIcon = bmp;
+                    var bitmap = new BitmapImage();
+                    await bitmap.SetSourceAsync(stream);
+                    _vm.SourceAppIcon = bitmap;
                 }
-                catch { }
+                catch
+                {
+                }
+
                 return;
             }
         }
-        catch { }
+        catch
+        {
+        }
 
         var exeName = sourceAppUserModelId;
         if (exeName.Contains('!')) exeName = exeName.Split('!')[0];
         if (exeName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
         {
-            exeName = System.IO.Path.GetFileNameWithoutExtension(exeName);
+            exeName = Path.GetFileNameWithoutExtension(exeName);
         }
         else
         {
@@ -431,17 +443,21 @@ public sealed class MediaModule : IIslandModule
 
         if (!string.IsNullOrEmpty(appId) && !appId.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
         {
-            var dotIdx = appId.LastIndexOf('.');
-            var nice = dotIdx >= 0 ? appId[(dotIdx + 1)..] : appId;
+            var dotIndex = appId.LastIndexOf('.');
+            var nice = dotIndex >= 0 ? appId[(dotIndex + 1)..] : appId;
             if (!string.IsNullOrWhiteSpace(nice))
+            {
                 return LookupKnownApp(nice);
+            }
         }
 
         var segments = familyPart.Split('_');
-        string name = segments[0];
+        var name = segments[0];
         var lastDot = name.LastIndexOf('.');
         if (lastDot >= 0)
+        {
             name = name[(lastDot + 1)..];
+        }
 
         return LookupKnownApp(name);
     }
@@ -473,10 +489,13 @@ public sealed class MediaModule : IIslandModule
 
     private void UpdateLevelMonitor()
     {
-        AudioLog.Write($"UpdateLevelMonitor: IsPlaying={_vm.IsPlaying}, enabled={_enabled}, Glow={_vm.GlowEnabled}, monitor={_levelMonitor != null}, running={_levelMonitor?.IsRunning}, status={_levelMonitor?.Status}");
         if (_vm.IsPlaying && _enabled && _vm.GlowEnabled)
+        {
             _levelMonitor?.Start();
+        }
         else
+        {
             _levelMonitor?.Stop();
+        }
     }
 }

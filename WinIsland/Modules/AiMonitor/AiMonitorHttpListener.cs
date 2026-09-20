@@ -7,17 +7,18 @@ namespace WinIsland.Modules.AiMonitor;
 public sealed class AiMonitorHttpListener : IDisposable
 {
     private const int Port = 47321;
-    private HttpListener? _listener;
+
     private readonly AiMonitorViewModel _vm;
-    private readonly IDynamicIslandApi _api;
-    private readonly AiMonitorModule _module;
+    private readonly IPluginContext _context;
+    private readonly AiMonitorPlugin _plugin;
+    private HttpListener? _listener;
     private bool _disposed;
 
-    public AiMonitorHttpListener(AiMonitorViewModel vm, IDynamicIslandApi api, AiMonitorModule module)
+    public AiMonitorHttpListener(AiMonitorViewModel vm, IPluginContext context, AiMonitorPlugin plugin)
     {
         _vm = vm;
-        _api = api;
-        _module = module;
+        _context = context;
+        _plugin = plugin;
     }
 
     public void Start()
@@ -28,14 +29,23 @@ public sealed class AiMonitorHttpListener : IDisposable
         _ = ListenLoop();
     }
 
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        try { _listener?.Stop(); } catch { }
+        try { _listener?.Close(); } catch { }
+        _listener = null;
+    }
+
     private async Task ListenLoop()
     {
         while (_listener != null && !_disposed)
         {
             try
             {
-                var ctx = await _listener.GetContextAsync();
-                _ = HandleRequest(ctx);
+                var context = await _listener.GetContextAsync();
+                _ = HandleRequest(context);
             }
             catch (HttpListenerException) when (_disposed) { break; }
             catch (ObjectDisposedException) { break; }
@@ -43,46 +53,47 @@ public sealed class AiMonitorHttpListener : IDisposable
         }
     }
 
-    private async Task HandleRequest(HttpListenerContext ctx)
+    private async Task HandleRequest(HttpListenerContext context)
     {
         try
         {
-            if (ctx.Request.HttpMethod == "POST")
+            if (context.Request.HttpMethod == "POST")
             {
-                using var reader = new StreamReader(ctx.Request.InputStream);
+                using var reader = new StreamReader(context.Request.InputStream);
                 var body = await reader.ReadToEndAsync();
-                var payload = JsonSerializer.Deserialize<JsonElement>(body);
-                ProcessEvent(payload);
+                ProcessEvent(JsonSerializer.Deserialize<JsonElement>(body));
             }
 
-            ctx.Response.StatusCode = 200;
-            ctx.Response.ContentType = "text/plain";
-            var buf = System.Text.Encoding.UTF8.GetBytes("ok");
-            await ctx.Response.OutputStream.WriteAsync(buf);
-            ctx.Response.Close();
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "text/plain";
+            var buffer = System.Text.Encoding.UTF8.GetBytes("ok");
+            await context.Response.OutputStream.WriteAsync(buffer);
+            context.Response.Close();
         }
         catch
         {
             try
             {
-                ctx.Response.StatusCode = 500;
-                ctx.Response.Close();
+                context.Response.StatusCode = 500;
+                context.Response.Close();
             }
-            catch { }
+            catch
+            {
+            }
         }
     }
 
     private void ProcessEvent(JsonElement payload)
     {
-        var type = payload.TryGetProperty("type", out var t) ? t.GetString() : null;
+        var type = payload.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : null;
         if (type == null) return;
 
-        var message = payload.TryGetProperty("message", out var m) ? m.GetString() : "";
-        var detail = payload.TryGetProperty("detail", out var d) ? d.GetString() : "";
-        var subDetail = payload.TryGetProperty("subDetail", out var sd) ? sd.GetString() : "";
-        var progressVal = payload.TryGetProperty("progress", out var p) ? p.GetDouble() : 0;
+        var message = payload.TryGetProperty("message", out var messageElement) ? messageElement.GetString() : "";
+        var detail = payload.TryGetProperty("detail", out var detailElement) ? detailElement.GetString() : "";
+        var subDetail = payload.TryGetProperty("subDetail", out var subDetailElement) ? subDetailElement.GetString() : "";
+        var progress = payload.TryGetProperty("progress", out var progressElement) ? progressElement.GetDouble() : 0;
 
-        RunOnUI(() =>
+        _context.RunOnUI(() =>
         {
             switch (type)
             {
@@ -93,9 +104,9 @@ public sealed class AiMonitorHttpListener : IDisposable
                     _vm.SubDetail = subDetail ?? "";
                     _vm.IsRunning = true;
                     _vm.Progress = 0;
-                    _module.SetLive(true);
+                    _plugin.SetLive(true);
 
-                    _api.SendMessage(new IslandMessage
+                    _context.Island.ShowMessage(new IslandMessage
                     {
                         Title = "AI 任务开始",
                         Text = message ?? "OpenCode",
@@ -111,7 +122,7 @@ public sealed class AiMonitorHttpListener : IDisposable
                     _vm.SubDetail = subDetail ?? "";
                     _vm.IsRunning = false;
 
-                    _api.SendMessage(new IslandMessage
+                    _context.Island.ShowMessage(new IslandMessage
                     {
                         Title = "AI 任务完成",
                         Text = detail ?? message ?? "任务已完成",
@@ -120,7 +131,7 @@ public sealed class AiMonitorHttpListener : IDisposable
                         Duration = TimeSpan.FromSeconds(4),
                     });
 
-                    ScheduleHide();
+                    _plugin.ScheduleHide();
                     break;
 
                 case "task_error":
@@ -129,7 +140,7 @@ public sealed class AiMonitorHttpListener : IDisposable
                     _vm.SubDetail = "";
                     _vm.IsRunning = false;
 
-                    _api.SendMessage(new IslandMessage
+                    _context.Island.ShowMessage(new IslandMessage
                     {
                         Title = "AI 任务出错",
                         Text = detail ?? "任务出错",
@@ -138,42 +149,22 @@ public sealed class AiMonitorHttpListener : IDisposable
                         Duration = TimeSpan.FromSeconds(4),
                     });
 
-                    ScheduleHide();
+                    _plugin.ScheduleHide();
                     break;
 
                 case "task_progress":
                     _vm.Detail = detail ?? "任务执行中";
                     if (!string.IsNullOrEmpty(subDetail))
+                    {
                         _vm.SubDetail = subDetail;
-                    if (progressVal > 0 && progressVal <= 1)
-                        _vm.Progress = progressVal;
+                    }
+
+                    if (progress > 0 && progress <= 1)
+                    {
+                        _vm.Progress = progress;
+                    }
                     break;
             }
         });
-    }
-
-    private void ScheduleHide()
-    {
-        var timer = _api.Dispatcher.CreateTimer();
-        timer.Interval = TimeSpan.FromSeconds(5);
-        timer.IsRepeating = false;
-        timer.Tick += (_, _) => _module.SetLive(false);
-        timer.Start();
-    }
-
-    private void RunOnUI(Action action)
-    {
-        if (_api.Dispatcher.HasThreadAccess)
-            action();
-        else
-            _api.Dispatcher.TryEnqueue(() => action());
-    }
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        try { _listener?.Stop(); } catch { }
-        try { _listener?.Close(); } catch { }
     }
 }

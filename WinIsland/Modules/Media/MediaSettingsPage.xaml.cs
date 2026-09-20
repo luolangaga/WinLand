@@ -7,43 +7,43 @@ namespace WinIsland.Modules.Media;
 
 public sealed partial class MediaSettingsPage : UserControl
 {
-    private readonly IDynamicIslandApi _api;
-    private readonly MediaModule _module;
+    private readonly ISettingsStore _settings;
+    private readonly MediaPlugin _plugin;
     private bool _loading = true;
 
-    public MediaSettingsPage(IDynamicIslandApi api, MediaModule module)
+    public MediaSettingsPage(IPluginContext context, MediaPlugin plugin)
     {
-        _api = api;
-        _module = module;
+        _settings = context.Settings;
+        _plugin = plugin;
         InitializeComponent();
 
-        EnableToggle.IsOn = _api.Settings.Get("media.enabled", true);
-        GlowToggle.IsOn = _api.Settings.Get("media.glow", true);
-        PrioritySlider.Value = _api.Settings.Get("media.priority", 100);
-        StatusText.Text = _module.StatusText;
+        EnableToggle.IsOn = _settings.Get("enabled", true);
+        GlowToggle.IsOn = _settings.Get("glow", true);
+        PrioritySlider.Value = _settings.Get("priority", 100);
+        StatusText.Text = _plugin.StatusText;
         _loading = false;
     }
 
     private void EnableToggle_Toggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _api.Settings.Set("media.enabled", EnableToggle.IsOn);
+        _settings.Set("enabled", EnableToggle.IsOn);
     }
 
     private void GlowToggle_Toggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _api.Settings.Set("media.glow", GlowToggle.IsOn);
+        _settings.Set("glow", GlowToggle.IsOn);
     }
 
     private void PrioritySlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
         if (_loading) return;
-        _api.Settings.Set("media.priority", (int)PrioritySlider.Value);
+        _settings.Set("priority", (int)PrioritySlider.Value);
     }
 
     private void Refresh_Click(object sender, RoutedEventArgs e)
     {
-        StatusText.Text = _module.StatusText;
+        StatusText.Text = _plugin.StatusText;
     }
 }

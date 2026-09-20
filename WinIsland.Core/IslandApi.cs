@@ -1,33 +1,12 @@
-using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 
 namespace WinIsland.Core;
-
-public interface IDynamicIslandApi
-{
-    DispatcherQueue Dispatcher { get; }
-    ISettingsStore Settings { get; }
-    void SetLiveContent(string ownerId, IslandLiveContent? content);
-    void SendMessage(IslandMessage message);
-    void ShowContent(UIElement content, Windows.Foundation.Size size, TimeSpan? duration = null);
-    void DismissTemporary();
-    void AddSettingsPage(SettingsPageDescriptor page);
-    void OpenSettings(string? pageId = null);
-}
 
 public interface ISettingsStore
 {
     T Get<T>(string key, T defaultValue);
     void Set<T>(string key, T value);
     event Action<string>? Changed;
-}
-
-public interface IIslandModule
-{
-    string Id { get; }
-    string DisplayName { get; }
-    Task InitializeAsync(IDynamicIslandApi api);
-    Task ShutdownAsync();
 }
 
 public interface IMorphView
@@ -62,16 +41,18 @@ public sealed class IslandMessage
 
 public sealed class SettingsPageDescriptor
 {
-    public SettingsPageDescriptor(string id, string title, string glyph, Func<UIElement> factory)
+    public SettingsPageDescriptor(string id, string title, string glyph, Func<UIElement> factory, int order = 0)
     {
         Id = id;
         Title = title;
         Glyph = glyph;
         Factory = factory;
+        Order = order;
     }
 
     public string Id { get; }
     public string Title { get; }
     public string Glyph { get; }
     public Func<UIElement> Factory { get; }
+    public int Order { get; }
 }

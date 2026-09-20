@@ -7,11 +7,11 @@ namespace WinIsland.Modules.Messaging;
 
 public sealed partial class MessageSettingsPage : UserControl
 {
-    private readonly IDynamicIslandApi _api;
+    private readonly IIslandSurface _island;
 
-    public MessageSettingsPage(IDynamicIslandApi api)
+    public MessageSettingsPage(IPluginContext context)
     {
-        _api = api;
+        _island = context.Island;
         InitializeComponent();
     }
 
@@ -20,7 +20,7 @@ public sealed partial class MessageSettingsPage : UserControl
         var title = string.IsNullOrWhiteSpace(TitleBox.Text) ? "新消息" : TitleBox.Text.Trim();
         var seconds = double.IsNaN(DurationBox.Value) ? 4 : DurationBox.Value;
 
-        _api.SendMessage(new IslandMessage
+        _island.ShowMessage(new IslandMessage
         {
             Title = title,
             Text = string.IsNullOrWhiteSpace(BodyBox.Text) ? null : BodyBox.Text.Trim(),
@@ -30,7 +30,6 @@ public sealed partial class MessageSettingsPage : UserControl
 
     private void SendCustom_Click(object sender, RoutedEventArgs e)
     {
-        // 演示 ShowContent 接口：把任意 XAML 控件塞进灵动岛
         var panel = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -55,12 +54,12 @@ public sealed partial class MessageSettingsPage : UserControl
         });
         textPanel.Children.Add(new TextBlock
         {
-            Text = "通过 IDynamicIslandApi.ShowContent 展示",
+            Text = "通过 IIslandSurface.Show 展示",
             Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(160, 255, 255, 255)),
             FontSize = 12,
         });
         panel.Children.Add(textPanel);
 
-        _api.ShowContent(panel, new Windows.Foundation.Size(340, 92), TimeSpan.FromSeconds(5));
+        _island.Show(panel, new Windows.Foundation.Size(340, 92), TimeSpan.FromSeconds(5));
     }
 }

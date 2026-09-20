@@ -6,29 +6,29 @@ namespace WinIsland.Modules.Battery;
 
 public sealed partial class BatterySettingsPage : UserControl
 {
-    private readonly IDynamicIslandApi _api;
-    private readonly BatteryModule _module;
+    private readonly ISettingsStore _settings;
+    private readonly BatteryPlugin _plugin;
     private bool _loading = true;
 
-    public BatterySettingsPage(IDynamicIslandApi api, BatteryModule module)
+    public BatterySettingsPage(IPluginContext context, BatteryPlugin plugin)
     {
-        _api = api;
-        _module = module;
+        _settings = context.Settings;
+        _plugin = plugin;
         InitializeComponent();
 
-        EnableToggle.IsOn = _api.Settings.Get("battery.enabled", true);
-        StatusText.Text = _module.StatusText;
+        EnableToggle.IsOn = _settings.Get("enabled", true);
+        StatusText.Text = _plugin.StatusText;
         _loading = false;
     }
 
     private void EnableToggle_Toggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _api.Settings.Set("battery.enabled", EnableToggle.IsOn);
+        _settings.Set("enabled", EnableToggle.IsOn);
     }
 
     private void Refresh_Click(object sender, RoutedEventArgs e)
     {
-        StatusText.Text = _module.StatusText;
+        StatusText.Text = _plugin.StatusText;
     }
 }

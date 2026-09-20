@@ -8,19 +8,19 @@ namespace WinIsland.Modules.AiMonitor;
 
 public sealed partial class AiMonitorSettingsPage : UserControl
 {
-    private readonly IDynamicIslandApi _api;
-    private readonly AiMonitorModule _module;
-    private bool _loading = true;
+    private readonly ISettingsStore _settings;
+    private readonly AiMonitorPlugin _plugin;
     private readonly string _pluginPath;
+    private bool _loading = true;
 
-    public AiMonitorSettingsPage(IDynamicIslandApi api, AiMonitorModule module)
+    public AiMonitorSettingsPage(IPluginContext context, AiMonitorPlugin plugin)
     {
-        _api = api;
-        _module = module;
+        _settings = context.Settings;
+        _plugin = plugin;
         InitializeComponent();
 
-        EnableToggle.IsOn = _api.Settings.Get("aimonitor.enabled", true);
-        PrioritySlider.Value = _api.Settings.Get("aimonitor.priority", 80);
+        EnableToggle.IsOn = _settings.Get("enabled", true);
+        PrioritySlider.Value = _settings.Get("priority", 80);
 
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         _pluginPath = Path.Combine(home, ".config", "opencode", "plugins", "winland-monitor.ts");
@@ -32,13 +32,13 @@ public sealed partial class AiMonitorSettingsPage : UserControl
     private void EnableToggle_Toggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        _api.Settings.Set("aimonitor.enabled", EnableToggle.IsOn);
+        _settings.Set("enabled", EnableToggle.IsOn);
     }
 
     private void PrioritySlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
         if (_loading) return;
-        _api.Settings.Set("aimonitor.priority", (int)PrioritySlider.Value);
+        _settings.Set("priority", (int)PrioritySlider.Value);
     }
 
     private void Install_Click(object sender, RoutedEventArgs e)
@@ -167,15 +167,15 @@ export const WinLandMonitor = async ({ project, client, $, directory, worktree }
         InstallButton.Content = installed ? "已安装" : "安装";
         InstallButton.IsEnabled = !installed;
         InstallHint.Text = installed
-            ? $"插件已安装于 ~/.config/opencode/plugins/"
+            ? "插件已安装于 ~/.config/opencode/plugins/"
             : "安装到 OpenCode 全局插件目录，自动连接 WinIsland";
 
-        if (_module.IsEnabled)
+        if (_plugin.IsEnabled)
         {
             StatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(
                 Windows.UI.Color.FromArgb(0xFF, 0x6C, 0xCB, 0x5F));
-            StatusText.Text = _module.IsRunning
-                ? $"运行中: {_module.CurrentTask} — {_module.CurrentDetail}"
+            StatusText.Text = _plugin.IsRunning
+                ? $"运行中: {_plugin.CurrentTask} — {_plugin.CurrentDetail}"
                 : "已连接 · 等待 AI 任务";
         }
         else

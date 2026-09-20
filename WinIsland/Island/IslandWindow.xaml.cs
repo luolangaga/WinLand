@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
 using WinIsland.Core;
+using WinIsland.Core.Plugins;
 
 namespace WinIsland.Island;
 
@@ -29,6 +30,7 @@ public sealed partial class IslandWindow : Window
     private static readonly Size MaxMessageSize = new(280, 40);
 
     private readonly SettingsService _settings;
+    private readonly IPluginLogger _log;
     private readonly nint _hwnd;
     private readonly OverlappedPresenter _presenter;
 
@@ -37,6 +39,7 @@ public sealed partial class IslandWindow : Window
     // 临时内容
     private UIElement? _tempContent;
     private Size _tempSize;
+    private string? _tempOwner;
 
     private readonly DispatcherQueueTimer _tempTimer;
     private readonly DispatcherQueueTimer _hoverGuard;
@@ -68,9 +71,10 @@ public sealed partial class IslandWindow : Window
     private IReadOnlyList<(string Owner, IslandLiveContent Content)> QueueItems
         => _live.Count > 1 ? _live.Skip(1).ToList() : Array.Empty<(string, IslandLiveContent)>();
 
-    public IslandWindow(SettingsService settings)
+    public IslandWindow(SettingsService settings, PluginLogService logs)
     {
         _settings = settings;
+        _log = logs.Host;
         InitializeComponent();
 
         AppWindow.IsShownInSwitchers = false;
@@ -152,10 +156,11 @@ public sealed partial class IslandWindow : Window
         UpdateVisibility();
     }
 
-    public void ShowTemporary(UIElement content, Size size, TimeSpan duration)
+    public void ShowTemporary(UIElement content, Size size, TimeSpan duration, string? owner = null)
     {
         _tempContent = content;
         _tempSize = size;
+        _tempOwner = owner;
         _tempTimer.Stop();
         _tempTimer.Interval = duration;
         _tempTimer.Start();
@@ -164,14 +169,6 @@ public sealed partial class IslandWindow : Window
         TeardownQueue();
         _expanded = false;
 
-        var live = ActiveLive;
-        if (live?.MorphView != null)
-        {
-            // 确保 View 在 ContentHost 里（可能刚从队列拆回来）
-            ContentHost.Content = live.MorphView.View;
-            live.MorphView.AnimateToCompact(CollapseDuration);
-        }
-
         ContentHost.Content = content;
         EnsureCanvas();
         AnimateIslandSize(size, CollapseDuration, isTemporary: true);
@@ -179,23 +176,25 @@ public sealed partial class IslandWindow : Window
         UpdateVisibility();
     }
 
-    public void DismissTemporary()
+    public void DismissTemporary(string? owner = null)
     {
         if (_tempContent == null) return;
+        if (owner != null && _tempOwner != owner) return;
         _tempTimer.Stop();
         _tempContent = null;
+        _tempOwner = null;
         EnsureCanvas();
         TransitionToLiveState();
         UpdateVisibility();
     }
 
-    public void ShowMessage(IslandMessage msg)
+    public void ShowMessage(IslandMessage msg, string? owner = null)
     {
         var view = BuildMessageView(msg);
         const double width = 280;
         view.Measure(new Size(width, double.PositiveInfinity));
         var height = Math.Clamp(view.DesiredSize.Height, 36, 40);
-        ShowTemporary(view, new Size(width, height), msg.Duration);
+        ShowTemporary(view, new Size(width, height), msg.Duration, owner);
     }
 
     public void RefreshFromSettings()
@@ -306,7 +305,7 @@ public sealed partial class IslandWindow : Window
                 _expanded = true;
                 AnimateIslandSize(live.ExpandedSize, ExpandDuration);
                 SetCornerRadius(Math.Min(28, live.ExpandedSize.Height / 2));
-                live.MorphView.AnimateToExpanded(ExpandDuration);
+                AnimateMorphView(ActiveOwner, live.MorphView, expand: true);
                 BuildQueue();
             }
             else
@@ -315,7 +314,7 @@ public sealed partial class IslandWindow : Window
                 TeardownQueue();
                 AnimateIslandSize(live.CompactSize, CollapseDuration);
                 SetCornerRadius(live.CompactSize.Height / 2);
-                live.MorphView.AnimateToCompact(CollapseDuration);
+                AnimateMorphView(ActiveOwner, live.MorphView, expand: false);
             }
         }
         else
@@ -361,7 +360,6 @@ public sealed partial class IslandWindow : Window
             if (content.MorphView != null)
             {
                 inner = content.MorphView.View;
-                content.MorphView.AnimateToExpanded(ExpandDuration);
             }
             else
             {
@@ -377,6 +375,9 @@ public sealed partial class IslandWindow : Window
                 Child = inner,
             };
             QueuePanel.Children.Add(border);
+
+            // 动画必须在视图进入可视树之后再启动（否则插件视图可能在未加载状态下执行属性路径动画而失败）
+            AnimateMorphView(item.Owner, content.MorphView, expand: true);
         }
 
         QueuePanel.Visibility = Visibility.Visible;
@@ -399,7 +400,7 @@ public sealed partial class IslandWindow : Window
         // 先停止队列中所有 MorphView 的动画
         for (int i = 0; i < count; i++)
         {
-            queue[i].Content.MorphView?.AnimateToCompact(CollapseDuration);
+            AnimateMorphView(queue[i].Owner, queue[i].Content.MorphView, expand: false);
         }
 
         // 从 Border 中取出 MorphView.View（断开父子关系）
@@ -471,6 +472,26 @@ public sealed partial class IslandWindow : Window
         return grid;
     }
 
+    private string ActiveOwner => _live.Count > 0 ? _live[0].Owner : "(无)";
+
+    /// <summary>
+    /// 插件视图的形态动画属于插件代码：必须在每个调用点守卫，
+    /// 否则插件动画抛错会变成 WinUI 未处理异常（stowed exception）直接崩掉宿主。
+    /// </summary>
+    private void AnimateMorphView(string owner, IMorphView? view, bool expand)
+    {
+        if (view == null) return;
+        try
+        {
+            if (expand) view.AnimateToExpanded(ExpandDuration);
+            else view.AnimateToCompact(CollapseDuration);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"插件「{owner}」的形态动画执行失败（已忽略，宿主继续运行）", ex);
+        }
+    }
+
     private void OnHoverEnter()
     {
         if (_tempContent != null) return;
@@ -486,7 +507,7 @@ public sealed partial class IslandWindow : Window
         {
             AnimateIslandSize(live.ExpandedSize, ExpandDuration);
             SetCornerRadius(Math.Min(28, live.ExpandedSize.Height / 2));
-            live.MorphView.AnimateToExpanded(ExpandDuration);
+            AnimateMorphView(ActiveOwner, live.MorphView, expand: true);
         }
         else
         {
@@ -515,7 +536,7 @@ public sealed partial class IslandWindow : Window
         {
             AnimateIslandSize(live.CompactSize, CollapseDuration);
             SetCornerRadius(live.CompactSize.Height / 2);
-            live.MorphView.AnimateToCompact(CollapseDuration);
+            AnimateMorphView(ActiveOwner, live.MorphView, expand: false);
         }
         else
         {

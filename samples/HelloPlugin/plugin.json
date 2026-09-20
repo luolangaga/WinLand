@@ -1,0 +1,13 @@
+{
+  "id": "hello",
+  "name": "Hello 插件",
+  "version": "1.0.0",
+  "description": "示例插件：代码构建 UI、私有依赖、设置页、定时器与完整清理",
+  "author": "WinIsland",
+  "icon_glyph": "\uE8BD",
+  "entry_dll": "HelloPlugin.dll",
+  "api_version": 2,
+  "min_host_version": "2.0.0",
+  "license": "MIT",
+  "tags": ["sample", "demo"]
+}

@@ -53,8 +53,18 @@ public sealed partial class SettingsWindow : Window
                 Icon = new FontIcon { Glyph = page.Glyph },
             });
         }
-        if (selectedId != null) SelectPage(selectedId);
-        else if (Nav.MenuItems.Count > 0) Nav.SelectedItem = Nav.MenuItems[0];
+        if (selectedId != null && Nav.MenuItems.OfType<NavigationViewItem>().Any(i => (string?)i.Tag == selectedId))
+        {
+            SelectPage(selectedId);
+        }
+        else if (Nav.MenuItems.Count > 0)
+        {
+            Nav.SelectedItem = Nav.MenuItems[0];
+        }
+        else
+        {
+            PageHost.Content = null;
+        }
     }
 
     /// <summary>切换到指定页面。</summary>

@@ -2,16 +2,13 @@ using System.Text.Json;
 
 namespace WinIsland.Core;
 
-/// <summary>
-/// JSON 键值设置存储，保存于 %LocalAppData%\WinIsland\settings.json。
-/// </summary>
 public sealed class SettingsService : ISettingsStore
 {
     private readonly string _path;
     private readonly Dictionary<string, JsonElement> _data = new();
     private readonly object _lock = new();
-
-    public event Action<string>? Changed;
+    private readonly object _eventGate = new();
+    private Action<string>? _changed;
 
     public SettingsService()
     {
@@ -20,6 +17,72 @@ public sealed class SettingsService : ISettingsStore
         Directory.CreateDirectory(dir);
         _path = Path.Combine(dir, "settings.json");
         Load();
+    }
+
+    public event Action<string>? Changed
+    {
+        add
+        {
+            lock (_eventGate)
+            {
+                _changed += value;
+            }
+        }
+        remove
+        {
+            lock (_eventGate)
+            {
+                _changed -= value;
+            }
+        }
+    }
+
+    public T Get<T>(string key, T defaultValue)
+    {
+        lock (_lock)
+        {
+            if (_data.TryGetValue(key, out var element))
+            {
+                try
+                {
+                    return element.Deserialize<T>() ?? defaultValue;
+                }
+                catch
+                {
+                    return defaultValue;
+                }
+            }
+        }
+
+        return defaultValue;
+    }
+
+    public void Set<T>(string key, T value)
+    {
+        lock (_lock)
+        {
+            _data[key] = JsonSerializer.SerializeToElement(value);
+        }
+
+        Save();
+        RaiseChanged(key);
+    }
+
+    public void Remove(string key)
+    {
+        bool removed;
+        lock (_lock)
+        {
+            removed = _data.Remove(key);
+        }
+
+        if (!removed)
+        {
+            return;
+        }
+
+        Save();
+        RaiseChanged(key);
     }
 
     private void Load()
@@ -34,7 +97,6 @@ public sealed class SettingsService : ISettingsStore
         }
         catch
         {
-            // 配置损坏时忽略，使用默认值
         }
     }
 
@@ -50,36 +112,17 @@ public sealed class SettingsService : ISettingsStore
         }
         catch
         {
-            // 写盘失败不影响运行
         }
     }
 
-    public T Get<T>(string key, T defaultValue)
+    private void RaiseChanged(string key)
     {
-        lock (_lock)
+        Action<string>? handler;
+        lock (_eventGate)
         {
-            if (_data.TryGetValue(key, out var el))
-            {
-                try
-                {
-                    return el.Deserialize<T>() ?? defaultValue;
-                }
-                catch
-                {
-                    return defaultValue;
-                }
-            }
+            handler = _changed;
         }
-        return defaultValue;
-    }
 
-    public void Set<T>(string key, T value)
-    {
-        lock (_lock)
-        {
-            _data[key] = JsonSerializer.SerializeToElement(value);
-        }
-        Save();
-        Changed?.Invoke(key);
+        handler?.Invoke(key);
     }
 }

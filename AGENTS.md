@@ -2,7 +2,9 @@
 
 ## Project
 
-Windows Dynamic Island desktop app (WinUI 3 / Windows App SDK 1.8+). Unpackaged WinExe — no MSIX, no store packaging. Two-project solution: `WinIsland.Core/` (SDK class library) + `WinIsland/` (main app).
+Windows Dynamic Island desktop app (WinUI 3 / Windows App SDK 2.3.1). Unpackaged WinExe — no MSIX, no store packaging. Projects: `WinIsland.Core/` (plugin SDK, v2.0), `WinIsland/` (main app), `samples/` (HelloPlugin / XamlPlugin / HardwareMonitor example plugins), `tools/pack-plugin.ps1` (`.lwp` packaging).
+
+Plugin authoring docs: `PLUGIN.md`.
 
 ## Build & Run
 
@@ -21,56 +23,68 @@ Target: `net10.0-windows10.0.26100.0`, min `10.0.17763.0`. Requires .NET 10 SDK 
 ## Architecture
 
 ```
-WinIsland.Core/              — SDK DLL (distribute to plugin developers)
-  IslandApi.cs               — All public interfaces (IDynamicIslandApi, IIslandModule, IMorphView, etc.)
-  IslandPluginAttribute.cs   — Attribute for plugin discovery and metadata
-  IslandPluginBase.cs        — Convenience base class for plugins
-  IPluginManifest.cs         — Plugin metadata interface + PluginManifest class
-  IPluginContext.cs           — Plugin context and logger interfaces
-  PluginInfo.cs              — Plugin runtime state (PluginState enum + PluginInfo class)
-  PluginConstants.cs         — Plugin folder name, manifest file name constants
+WinIsland.Core/              — SDK DLL (luolan.winland.Core 2.0.0, distribute to plugin developers)
+  IslandApi.cs               — ISettingsStore / IMorphView / IslandLiveContent / IslandMessage / SettingsPageDescriptor
+  IIslandPlugin.cs           — plugin entry point (InitializeAsync(IPluginContext) / ShutdownAsync)
+  IPluginContext.cs          — IPluginContext / IIslandSurface / IPluginLogger
+  IslandSdk.cs               — ApiVersion, HostVersion, manifest/package constants
+  PluginManifest.cs          — manifest data type (plugin.json)
+  IslandPluginBase.cs        — convenience base (Context/Log/Settings/SetContent/UpdateContent/RunOnUI)
+  PluginXaml.cs              — supported way to load XAML from a plugin assembly (LoadComponent workaround)
+  ActionDisposable.cs        — tiny IDisposable helper for plugin authors
 
 WinIsland/                    — Main application
-  App.xaml.cs                — Entry point: creates IslandWindow, IslandService, PluginLoader
+  App.xaml.cs                — Entry: IslandWindow, IslandService, PluginHost, built-in manifests, global crash logging
   Core/
-    IslandService.cs         — IDynamicIslandApi implementation; marshals calls to UI thread
-    PluginLoader.cs          — Plugin engine: scan, load DLL, enable/disable, unload
+    IslandService.cs         — host-side content/temp/settings-page API (RemoveSettingsPage, page Order)
     SettingsService.cs       — JSON key-value store at %LocalAppData%\WinIsland\settings.json
     TransparentBackdrop.cs   — Fully transparent window backdrop (Composition + DWM alpha)
     TrayIcon.cs              — Native Shell_NotifyIcon tray icon with Win32 popup menu
     Win32.cs                 — All P/Invoke: window styles, DWM, subclassing for border removal
+    Plugins/                 — Plugin engine v2
+      PluginHost.cs          — facade: discover/install/enable/disable/reload/uninstall, per-plugin serialization
+      PluginInstance.cs      — state machine + timeouts + guarded callbacks + ALC unload & GC verification
+      PluginAssemblyContext.cs — collectible ALC + AssemblyDependencyResolver + host-provided-assembly policy
+      PluginScope.cs         — registration ledger; revoke = remove pages, clear content, dispose timers/subscriptions
+      ScopedIslandSurface.cs / ScopedSettings.cs / PluginContext.cs — per-plugin scoped API surface
+      PluginManifestReader.cs — plugin.json parsing + field-level validation
+      LwpInstaller.cs        — .lwp (zip) validate/extract/atomic install/update/uninstall
+      PluginLogService.cs    — per-plugin ring buffer + file logs (logs/plugin.<id>.log)
+      PluginInfo.cs / PluginStateText.cs — runtime state shown in the plugin manager
   Island/
-    IslandWindow.xaml.cs     — The island window: state machine (idle->compact->expanded->temp), size animation, hover detection
+    IslandWindow.xaml.cs     — island window: state machine, size animation, hover, hit region, AnimateMorphView guard
   Modules/
-    GeneralModule.cs         — Built-in: registers general settings page
-    Media/                   — Built-in: GSMTC media session -> MorphView island content
-    Messaging/               — Built-in: message-send test module
+    Media/ Battery/ AiMonitor/ Messaging/ — built-in plugins (IslandPluginBase; complete shutdown, no leaks)
   Settings/
-    SettingsWindow.xaml.cs   — Settings shell; pages are registered dynamically by modules
-    PluginManagerPage.xaml   — Plugin manager UI: load/disable/unload plugins
+    SettingsWindow.xaml.cs   — settings shell; nav pages registered dynamically (ordered by SettingsPageDescriptor.Order)
+    GeneralSettingsPage.xaml.cs — host-owned general page (island.* settings)
+    PluginManagerPage.xaml   — plugin manager: install .lwp, enable/disable, reload, delete, logs, error details
 ```
 
 ## Key Design Rules
 
-- **Host owns chrome; modules own content.** IslandWindow controls size, corner radius, hover, expand/collapse, temp message overlay. Modules only provide XAML content via `IslandLiveContent`.
+- **Host owns chrome; plugins own content.** IslandWindow controls size, corner radius, hover, expand/collapse, temp message overlay. Plugins only provide XAML content via `IslandLiveContent`.
 - **MorphView mode preferred.** Single view with `AnimateToExpanded`/`AnimateToCompact` for element-level morph. Dual-view (CompactContent + ExpandedContent) is the fallback.
-- **All `IDynamicIslandApi` methods are thread-safe** — `IslandService.RunOnUI` marshals to UI thread automatically. But UIElements must still be created on the UI thread.
-- **Settings keys follow `<moduleId>.<key>` convention** (e.g. `media.enabled`, `island.visible`).
-- **Plugin disable keys follow `plugin.<moduleId>.disabled` convention**.
-- **WinIsland.Core is the SDK** — only interfaces, attributes, and data types. No implementation. Plugin developers reference this DLL only.
+- **Every plugin callback must be guarded.** Plugin code reached from the host (`InitializeAsync`, `ShutdownAsync`, settings-page factories, `OnTap`, timer ticks, settings handlers, **and `IMorphView.AnimateToExpanded/Compact`**) is wrapped by `PluginInstance.InvokeGuarded` / `IslandWindow.AnimateMorphView`. An unguarded plugin exception surfaces as a WinUI stowed exception (0xc000027b) and **kills the process** — the hover-expand crash of 2026-09-20 was exactly this. Add a guard at any new call site.
+- **Everything a plugin registers is revoked on disable/unload** via `PluginScope` (settings pages, live content, temp messages, timers, subscriptions). A plugin that cleans up badly still leaves zero residue; a plugin calling `IPluginContext` APIs while not `Active` is ignored and logged.
+- **Provider assembly resolution**: `WinIsland.Core`, `System.*`/`Windows.*`/`WinRT.*`, and any assembly whose file exists in the app directory always bind to the **host**; every other dependency resolves from the **plugin directory** (via `AssemblyDependencyResolver` + the plugin's `deps.json`). Never widen this to "all `Microsoft.*`" — that breaks plugins shipping their own `Microsoft.*` dependencies.
+- **Never delete files of a loaded plugin.** Updates/uninstalls rename the old directory aside and delete best-effort; leftovers are swept at next startup. `PluginInstance.UnloadAssemblyCore` verifies ALC collection with a `WeakReference` and logs the outcome.
+- **All host-side API methods are thread-safe** (`IslandService.RunOnUI` marshals to the UI thread). UIElements must still be created on the UI thread; `IPluginContext.CreateTimer` requires the UI thread.
+- **Settings keys**: plugin settings are auto-prefixed with `<pluginId>.` (a plugin cannot touch host keys); host/island keys use `island.*`; per-plugin disable flag is `plugin.<pluginId>.disabled`.
+- **WinIsland.Core is the SDK** — only interfaces, attributes, and data types. No implementation. Plugin developers reference this DLL only. `luolan.winland.Core` version tracks the API version (2.0.0).
 
-## Adding a Module
+## Adding a Plugin
 
-### Built-in module
-1. Create a class implementing `IIslandModule` (in `Modules/` or a subfolder)
-2. Register in `App.xaml.cs` via `_pluginLoader.RegisterBuiltIn(new YourModule())`
-3. See `PLUGIN.md` for full API reference
+### Built-in plugin
+1. Create `Modules/<Name>/<Name>Plugin.cs` extending `IslandPluginBase` (see `MediaPlugin` for a full example).
+2. Register it in `App.xaml.cs`: `_plugins.RegisterBuiltIn(manifest, () => new YourPlugin());` — the manifest carries id/name/icon/description.
+3. Host-owned chrome (e.g. the general island settings page) is registered directly via `_service.AddSettingsPage(...)`, not as a plugin.
 
-### External plugin (DLL)
-1. Create a class library project referencing `WinIsland.Core.dll`
-2. Implement `IIslandModule` (or extend `IslandPluginBase`)
-3. Optionally mark with `[IslandPlugin("id", "name", ...)]` for metadata
-4. Build and place DLL in `plugins/` directory, or load via Plugin Manager UI
+### External plugin
+1. Create a class library + `plugin.json` (`samples/HardwareMonitor` is the reference, `samples/HelloPlugin` the minimal one).
+2. Class: `public sealed class X : IslandPluginBase`; any dependencies must be copied into the plugin folder (`CopyLocalLockFileAssemblies=true`, see PLUGIN.md §6).
+3. Build (the sample csproj copies to `plugins/<id>/`), or pack with `pwsh tools/pack-plugin.ps1 -ProjectDir <dir>` and install via the plugin manager / by dropping the `.lwp` into `plugins/`.
+4. Full API reference and pitfalls: `PLUGIN.md`.
 
 ## Animation Constants
 

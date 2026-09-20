@@ -1,368 +1,268 @@
-# WinIsland 插件开发指南
+# WinIsland 插件开发指南（SDK 2.0）
 
-WinIsland 支持动态加载外部 DLL 插件。主程序负责窗口管理（透明、置顶、无白边）、悬浮检测、尺寸动画、临时消息覆盖/恢复、设置窗口外壳。插件只提供内容——不接触尺寸、圆角、悬浮事件。
+> **SDK 2.0 与 1.x 不兼容。** 插件必须以 `plugins/<id>/ + plugin.json`（或 `.lwp` 包）提供，入口类型为 `IIslandPlugin`；
+> 1.x 的散装 DLL、`IIslandModule`、`IslandPluginAttribute` 全部不再支持。迁移见文末。
 
-## 快速开始
+---
 
-### 1. 创建插件项目
+## 1. 插件格式
 
-```powershell
-dotnet new classlib -n MyIslandPlugin -o MyIslandPlugin
-cd MyIslandPlugin
-dotnet add package luolan.winland.Core
+```
+plugins/
+  hw-monitor/                  ← 一个插件一个目录，目录名建议等于插件 Id
+    plugin.json                ← 清单（唯一元数据来源）
+    HardwareMonitor.dll        ← 入口程序集（plugin.json 的 entry_dll）
+    HardwareMonitor.deps.json  ← 依赖清单（依赖解析需要，构建自动生成）
+    <私有依赖>.dll  *.xbf  assets/…
+  demo.lwp                     ← 放在 plugins/ 根目录的插件包，启动时自动安装并删除
 ```
 
-> 如果包尚未发布到 nuget.org，先用本地源安装：
-> ```powershell
-> dotnet nuget add source "C:\path\to\nupkg-folder" -n LocalWinIsland
-> dotnet add package luolan.winland.Core -s LocalWinIsland
-> ```
+### plugin.json
 
-### 2. 实现插件
+```json
+{
+  "id": "hw-monitor",
+  "name": "硬件监控",
+  "version": "1.0.0",
+  "entry_dll": "HardwareMonitor.dll",
+  "api_version": 2,
+  "min_host_version": "2.0.0",
+  "description": "可选描述",
+  "author": "可选作者",
+  "icon_glyph": "\uE950",
+  "homepage": "https://example.com",
+  "license": "MIT",
+  "tags": ["hardware"]
+}
+```
 
-**方式 A：使用 `IslandPluginAttribute`（推荐）**
+| 字段 | 必填 | 规则 |
+|------|------|------|
+| `id` | ✔ | `^[a-z0-9][a-z0-9-]{1,63}$`，全局唯一 |
+| `name` | ✔ | 显示名称 |
+| `version` | ✔ | 数字点分版本号（`1.2.3`） |
+| `entry_dll` | ✔ | 包内文件名，不能含路径；不能是 `WinIsland.Core.dll` |
+| `api_version` | ✔ | 当前为 `2`；必须 ≤ 宿主支持的版本 |
+| `min_host_version` | ✖ | 低于此宿主版本时拒绝加载 |
+| 其余 | ✖ | 展示用 |
+
+校验失败时插件会以 **错误** 状态出现在「插件管理」里，并写明具体字段和原因；日志在
+`%LocalAppData%\WinIsland\logs\plugin.<id>.log`。
+
+---
+
+## 2. 最小插件
 
 ```csharp
 using WinIsland.Core;
 
-namespace MyIslandPlugin;
+namespace MyPlugin;
 
-[IslandPlugin("my-plugin", "我的插件", Description = "一个示例插件", Author = "作者", Version = "1.0.0")]
 public sealed class MyPlugin : IslandPluginBase
 {
-    public override string Id => "my-plugin";
-    public override string DisplayName => "我的插件";
-    public override string? Description => "一个示例插件";
-    public override string? Author => "作者";
-    public override string? Version => "1.0.0";
-
-    public override Task InitializeAsync(IDynamicIslandApi api)
+    protected override Task OnInitializeAsync()
     {
-        Api = api; // IslandPluginBase 自动设置
-
-        // 注册设置页面
-        Api.AddSettingsPage(new SettingsPageDescriptor(
-            "my-plugin", DisplayName, "\uE713", () => new MySettingsPage(Api)));
-
-        // 注册常驻内容
-        var view = new MyIslandView();
-        Api.SetLiveContent(Id, new IslandLiveContent
-        {
-            MorphView = view,
-            CompactSize = new Size(250, 40),
-            ExpandedSize = new Size(420, 158),
-        });
-
+        Log.Info("插件已启动");
+        Context.Island.ShowMessage(new IslandMessage { Title = "你好", Text = "来自我的插件" });
         return Task.CompletedTask;
     }
 
-    public override Task ShutdownAsync()
+    protected override Task OnShutdownAsync()
     {
-        Api.SetLiveContent(Id, null);
+        Log.Info("插件已停用");
         return Task.CompletedTask;
     }
 }
 ```
 
-**方式 B：直接实现 `IIslandModule`**
-
-```csharp
-using WinIsland.Core;
-
-namespace MyIslandPlugin;
-
-public sealed class MyPlugin : IIslandModule
-{
-    public string Id => "my-plugin";
-    public string DisplayName => "我的插件";
-
-    private IDynamicIslandApi _api = null!;
-
-    public Task InitializeAsync(IDynamicIslandApi api)
-    {
-        _api = api;
-        return Task.CompletedTask;
-    }
-
-    public Task ShutdownAsync() => Task.CompletedTask;
-}
-```
-
-### 3. 编译 & 部署
-
-```powershell
-dotnet build -c Release
-```
-
-将输出的 `MyIslandPlugin.dll` 复制到 WinIsland 的 `plugins/` 目录：
-
-```
-WinIsland/
-  WinIsland.exe
-  plugins/
-    MyIslandPlugin.dll    ← 放这里
-```
-
-或者在设置窗口的「插件管理」页面点击「浏览 DLL...」直接加载。
+要求：`public sealed class`、实现 `IIslandPlugin`（或继承 `IslandPluginBase`）、有公共无参构造函数。
+**一个插件包只允许一个 `IIslandPlugin` 实现**，多于一个或没有都会以明确错误终止加载。
 
 ---
 
-## 插件管理器
+## 3. 生命周期与状态
 
-主程序内置插件管理器（设置 → 插件管理），支持：
+```
+Discovered → Loaded → Active         正常运行
+                     ↘ Disabled       被用户禁用（持久化为 plugin.<id>.disabled）
+                     ↘ Faulted        初始化失败 / 运行期反复出错
+Dispose/卸载 → Unloading → 程序集请求卸载并验证回收
+```
 
-| 功能 | 说明 |
+* `InitializeAsync` 在**启用循环中可能被多次调用**（禁用→启用、重新加载），必须可重复执行。
+* `ShutdownAsync` 在停用前调用；**即使它抛异常或写得不干净，宿主也会兜底撤销**：
+  移除该插件注册的设置页、清空常驻内容、关闭它创建的定时器、退订设置变更、收回临时消息。
+* 非 `Active`/`Loaded` 状态下调用 Island API 会被**忽略并记日志**（不会产生"停用后的幽灵行为"）。
+* 初始化超过 10 秒会被判定失败；单会话内 5 次未处理异常会自动停用插件并记为错误。
+
+---
+
+## 4. API 速查
+
+插件通过 `IPluginContext`（`IslandPluginBase` 里是 `Context`，并提供了 `Log`/`Settings`/`SetContent`/`RunOnUI` 快捷方式）与宿主交互：
+
+| 成员 | 说明 |
 |------|------|
-| 浏览加载 DLL | 选择外部 DLL 文件，自动复制到 plugins/ 目录并加载 |
-| 启用/禁用 | 每个插件有独立开关，禁用后调用 `ShutdownAsync` 并清除内容 |
-| 卸载 | 移除外部插件（内置插件不可卸载） |
-| 打开插件目录 | 快速打开 plugins/ 文件夹 |
-| 状态显示 | 运行中 / 已禁用 / 错误（含错误信息） |
+| `Manifest` | 当前插件清单（Id/Name/Version/…） |
+| `PluginDirectory` | 插件自己的目录（读资源文件用） |
+| `HostVersion` / `Dispatcher` | 宿主版本 / UI 线程调度器 |
+| `Log` | `Debug/Info/Warn/Error`，写入插件日志（内存环形缓冲 + 文件） |
+| `Settings` | **作用域化**设置存储，键自动加 `<id>.` 前缀（`Settings.Set("enabled", true)` → `hw-monitor.enabled`） |
+| `Island.SetContent(content)` | 注册常驻内容（`null` 取消）。owner 由宿主绑定为插件 Id |
+| `Island.ShowMessage(msg)` | 临时消息（标题 + 正文 + 图标 + 时长） |
+| `Island.Show(uiElement, size, duration)` | 临时展示任意控件 |
+| `Island.AddSettingsPage(desc)` | 注册设置页（停用时自动移除） |
+| `Register(IDisposable)` | 登记需要在停用时释放的资源（订阅、原生句柄…） |
+| `OnSettingsChanged(key, handler)` | 监听某个设置键（handler 在 UI 线程调用） |
+| `CreateTimer(interval, repeat, tick)` | UI 线程定时器（停用时自动停止并解绑） |
+| `RunOnUI` / `RunOnUIAsync` | 把工作编组回 UI 线程 |
 
-禁用状态持久化到设置：`plugin.<moduleId>.disabled = true`
-
----
-
-## 核心概念
-
-### 职责划分
-
-| 职责 | 谁负责 |
-|------|--------|
-| 窗口透明、置顶、无白边 | 主程序 |
-| 悬浮检测（进入/离开） | 主程序 |
-| 尺寸动画、圆角 | 主程序 |
-| 临时消息覆盖/恢复 | 主程序 |
-| 空闲态（无内容时的小圆点） | 主程序 |
-| **内容（紧凑视图、展开视图）** | **插件** |
-| **内容变形动画（元素级 morph）** | **插件** |
-| **业务逻辑（何时显示/隐藏）** | **插件** |
-| **设置页面** | **插件** |
-
-插件**不调用**任何尺寸/圆角/悬浮相关的方法。主程序根据插件提供的 `IslandLiveContent` 自动处理展开/收起。
-
----
-
-## 接口参考
-
-### IDynamicIslandApi
-
-插件通过此接口与主程序交互。在 `InitializeAsync` 中传入。
-
-| 成员 | 类型 | 说明 |
-|------|------|------|
-| `Dispatcher` | `DispatcherQueue` | UI 线程调度器 |
-| `Settings` | `ISettingsStore` | 持久化键值存储 |
-| `SetLiveContent(ownerId, content)` | `void` | 注册/取消常驻内容 |
-| `SendMessage(message)` | `void` | 发送临时文字消息 |
-| `ShowContent(content, size, duration)` | `void` | 临时展示任意 XAML 控件 |
-| `DismissTemporary()` | `void` | 立即收起临时内容 |
-| `AddSettingsPage(page)` | `void` | 注册设置页面 |
-| `OpenSettings(pageId)` | `void` | 打开设置窗口 |
-
-### IslandLiveContent
-
-| 属性 | 类型 | 说明 |
-|------|------|------|
-| `MorphView` | `IMorphView?` | 变形视图（优先使用） |
-| `CompactContent` | `UIElement?` | 紧凑态视图 |
-| `ExpandedContent` | `UIElement?` | 展开态视图 |
-| `CompactSize` | `Size` | 紧凑态尺寸（默认 230×40） |
-| `ExpandedSize` | `Size` | 展开态尺寸（默认 420×150） |
-
-### IMorphView
+### 常驻内容
 
 ```csharp
-public interface IMorphView
+// 1) 单视图变形（推荐）：一个视图同时承载紧凑/展开形态
+Context.Island.SetContent(new IslandLiveContent
 {
-    UIElement View { get; }
-    void AnimateToExpanded(TimeSpan duration);
-    void AnimateToCompact(TimeSpan duration);
-}
-```
+    Priority = 60,
+    MorphView = new MyMorphView(),      // 实现 IMorphView：View + AnimateToExpanded/Compact
+    CompactSize = new Size(250, 40),
+    ExpandedSize = new Size(420, 150),
+});
 
-### ISettingsStore
-
-| 成员 | 类型 | 说明 |
-|------|------|------|
-| `Get<T>(key, default)` | `T` | 读取设置值 |
-| `Set<T>(key, value)` | `void` | 写入设置值 |
-| `Changed` | `event Action<string>?` | 设置变更事件 |
-
-### IslandPluginAttribute
-
-```csharp
-[IslandPlugin("id", "显示名称", Description = "...", Author = "...", Version = "1.0.0", IconGlyph = "\uE712")]
-```
-
-标记在插件类上，主程序自动读取元数据。不标记也能工作（使用 `IIslandModule.Id` / `DisplayName`）。
-
-### IslandPluginBase
-
-便捷基类，提供 `Api`、`Settings`、`Log` 等属性，减少样板代码。
-
-### IPluginManifest / PluginInfo
-
-| 属性 | 说明 |
-|------|------|
-| `Id` | 唯一标识 |
-| `DisplayName` | 显示名称 |
-| `Description` | 描述（可选） |
-| `Author` | 作者（可选） |
-| `Version` | 版本号（可选） |
-| `IconGlyph` | Segoe Fluent Icons 字形（可选） |
-| `IsBuiltIn` | 是否内置模块 |
-| `State` | 插件状态（Discovered/Loaded/Initialized/Disabled/Error） |
-
-### IslandMessage
-
-| 属性 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `Title` | `string` | （必填） | 消息标题 |
-| `Text` | `string?` | `null` | 消息正文 |
-| `Glyph` | `string` | `\uE8BD` | Segoe Fluent Icons 字形 |
-| `AccentColor` | `Color?` | 系统蓝 | 图标底色 |
-| `Duration` | `TimeSpan` | 4 秒 | 展示时长 |
-
-### SettingsPageDescriptor
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `id` | `string` | 页面唯一 Id |
-| `title` | `string` | 导航栏显示标题 |
-| `glyph` | `string` | Segoe Fluent Icons 字形 |
-| `factory` | `Func<UIElement>` | 页面内容工厂 |
-
----
-
-## 典型模式
-
-### 模式一：常驻内容（MorphView 变形）
-
-```csharp
-public override Task InitializeAsync(IDynamicIslandApi api)
+// 2) 双视图：紧凑与展开是两个独立控件
+Context.Island.SetContent(new IslandLiveContent
 {
-    var view = new MyIslandView();
-    Api.SetLiveContent(Id, new IslandLiveContent
-    {
-        MorphView = view,
-        CompactSize = new Size(250, 40),
-        ExpandedSize = new Size(420, 158),
-    });
-    return Task.CompletedTask;
-}
-```
-
-### 模式二：常驻内容（双视图）
-
-```csharp
-Api.SetLiveContent(Id, new IslandLiveContent
-{
-    CompactContent = new MyCompactView(),
-    ExpandedContent = new MyExpandedView(),
+    CompactContent = compactPanel,
+    ExpandedContent = expandedPanel,
     CompactSize = new Size(250, 40),
     ExpandedSize = new Size(420, 150),
 });
 ```
 
-### 模式三：临时消息
-
-```csharp
-Api.SendMessage(new IslandMessage
-{
-    Title = "下载完成",
-    Text = "文件已保存到 Downloads 文件夹",
-    Glyph = "\uE74C",
-    Duration = TimeSpan.FromSeconds(3),
-});
-```
-
-### 模式四：临时自定义控件
-
-```csharp
-var panel = new StackPanel { /* ... */ };
-Api.ShowContent(panel, new Size(340, 92), TimeSpan.FromSeconds(5));
-```
-
-### 模式五：注册设置页面
-
-```csharp
-Api.AddSettingsPage(new SettingsPageDescriptor(
-    "my-plugin", "我的插件", "\uE713", () => new MySettingsPage(Api)));
-```
+`Priority` 决定多个插件同时注册内容时谁占据主岛（数值大者优先，其余进入展开后的队列）。
+小岛只显示主内容；展开后主内容 + 最多 3 个队列内容按大岛样式排列。
 
 ---
 
-## MorphView 实现要点
+## 5. 线程模型
 
-1. 创建 `UserControl`，实现 `IMorphView`
-2. 所有元素（紧凑态 + 展开态）常驻可视树
-3. 紧凑态不显示的元素设 `Height=0` + `Opacity=0`
-4. `AnimateToExpanded`：动画各元素到展开态值
-5. `AnimateToCompact`：动画各元素回紧凑态值
-6. 使用 `BackEase` 缓动，与主程序尺寸动画一致
+* `InitializeAsync` / `ShutdownAsync` / 设置页工厂 / `OnSettingsChanged` / `CreateTimer` 回调都在 **UI 线程** 执行。
+* 采样、网络、文件等耗时工作放到后台线程，然后用 `Context.RunOnUI(...)` 更新 UI。
+* `CreateTimer` 必须在 UI 线程调用；插件里创建的 `UIElement` 必须在 UI 线程创建。
+
+---
+
+## 6. 依赖与资源（最容易踩的坑）
+
+插件可以自带任意 NuGet 依赖和本机 DLL，宿主会用 `AssemblyDependencyResolver` + 插件的 `deps.json` 从插件目录解析：
+
+```xml
+<PropertyGroup>
+  <!-- 关键：库工程默认不复制 NuGet 依赖，插件必须打开 -->
+  <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+</PropertyGroup>
+
+<ItemGroup>
+  <!-- 运行时由宿主提供，不要打进插件包 -->
+  <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" PrivateAssets="all" ExcludeAssets="runtime" />
+  <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2526" PrivateAssets="all" ExcludeAssets="runtime" />
+</ItemGroup>
+```
+
+解析规则（宿主侧）：
+
+1. 框架程序集（`System.*` / `Windows.*` / `WinRT.*`）与 `WinIsland.Core` → **始终绑定宿主**，防止类型身份分裂。
+2. 其它程序集：**宿主目录里存在同名 DLL → 用宿主那份**；否则用插件目录里的副本。
+3. 因此：WinAppSDK/WinUI 运行时不必随插件分发（浪费 40MB），自己的依赖必须真的复制到插件目录
+   （`samples/HardwareMonitor` 的 csproj 里有一份可直接抄的过滤写法）。
+
+本机（native）依赖也放在插件目录里，`LoadUnmanagedDll` 会一并在该目录解析。
+
+---
+
+## 7. 开发循环
+
+```powershell
+# 插件工程里加一个构建后拷贝目标（见样例 csproj）
+dotnet build
+# 然后在「设置 → 插件管理」点「重新加载」，或用开关禁用→启用
+```
+
+日志：`%LocalAppData%\WinIsland\logs\plugin.<id>.log`（界面里「查看日志」也能看到最近 500 行）。
+
+---
+
+## 8. XAML 视图（可选路径）
+
+动态加载的程序集不在应用的 `resources.pri` 里，生成的 `InitializeComponent` 找不到自己的 XBF。
+需要 XAML 时用 SDK 提供的方法：
 
 ```csharp
-public void AnimateToExpanded(TimeSpan duration)
+public sealed partial class MyView : UserControl, IMorphView
 {
-    var sb = new Storyboard();
-    var easing = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.45 };
-    sb.Children.Add(Anim(Cover, "Width", 26, 72, duration, easing));
-    sb.Children.Add(Anim(Cover, "Height", 26, 72, duration, easing));
-    sb.Children.Add(Anim(Details, "Height", 0, 20, duration, easing));
-    sb.Children.Add(Anim(Details, "Opacity", 0, 1, duration, easing));
-    sb.Begin();
+    public MyView() => PluginXaml.Load(this);   // 代替 InitializeComponent()
 }
 ```
 
+约束：
+
+* XAML 文件与类同名，所在文件夹与命名空间一致（`MyPlugin.Views.MyView` ↔ `Views/MyView.xaml`）。
+* XAML 里只用框架类型，不要引用插件自己的自定义控件。
+* 图片等资源用 `Context.PluginDirectory` 拼绝对路径加载，不要用 `ms-appx:`。
+* **不要用 `Storyboard` 做形态动画**：属性路径动画在动态加载的 XBF 树上会报
+  `Invalid attribute value Unknown for property Height`（E_XAMLPARSEFAILED，会打断宿主的状态机）。
+  用逐帧属性赋值（`samples/XamlPlugin` 的 `AnimateToExpanded/Compact` 就是模板）。
+
 ---
 
-## 线程模型
+## 9. 打包与安装
 
-- `InitializeAsync` 在 UI 线程调用
-- 所有 `IDynamicIslandApi` 方法可在任意线程调用（自动编组到 UI 线程）
-- 后台线程创建 UIElement 前必须用 `Dispatcher.TryEnqueue` 编组
-
----
-
-## 生命周期
-
-```
-App 启动
-  ├─ 创建 IslandWindow
-  ├─ 创建 IslandService (IDynamicIslandApi)
-  ├─ PluginLoader.RegisterBuiltIn(...)     ← 注册内置模块
-  ├─ PluginLoader.LoadBuiltInModulesAsync() ← 初始化内置模块
-  ├─ PluginLoader.DiscoverAndLoadAsync()    ← 扫描 plugins/ 目录加载外部 DLL
-  │     ├─ 发现 IIslandModule 实现
-  │     ├─ 读取 IslandPluginAttribute 元数据
-  │     └─ 检查 plugin.<id>.disabled → 跳过或初始化
-  ├─ 运行中…
-  │     ├─ 用户在插件管理器中启用/禁用插件
-  │     ├─ 用户浏览加载新 DLL
-  │     └─ 插件调用 API 方法
-  └─ App 退出
-       └─ PluginLoader.ShutdownAllAsync()   ← 所有模块 ShutdownAsync
+```powershell
+# 把构建输出 + plugin.json 打成 .lwp（zip）
+pwsh tools/pack-plugin.ps1 -ProjectDir samples\HelloPlugin
 ```
 
----
-
-## 内置插件
-
-| 插件 | Id | 说明 |
-|------|-----|------|
-| `GeneralModule` | `general` | 通用设置：显示/隐藏、空闲隐藏、顶部偏移 |
-| `MediaModule` | `media` | 正在播放：GSMTC 系统媒体会话，MorphView 变形 |
-| `MessageModule` | `messenger` | 发送消息：设置页提供消息发送测试 |
-| `PluginManager` | `plugins` | 插件管理：加载/禁用/卸载插件 |
+* **安装**：把 `.lwp` 拖进 `plugins/`（启动时自动安装），或「插件管理 → 安装插件包…」。
+* **更新**：同 Id 的包会停用旧版本 → 卸载程序集 → 替换目录 → 重新启用。
+* **删除**：「插件管理 → 删除」，会真正移除插件目录；被占用的文件会在下次启动时清理。
+* 包内不需要（也不应该）包含 `WinIsland.Core.dll` 与 WinAppSDK 运行时文件，校验会拒绝前者。
 
 ---
 
-## 约定
+## 10. 样例
 
-- **设置键命名**：`<moduleId>.<key>`，如 `media.enabled`、`island.visible`
-- **插件禁用键**：`plugin.<moduleId>.disabled`
-- **Segoe Fluent Icons**：字形码参考 [Microsoft 文档](https://learn.microsoft.com/windows/apps/design/style/segoe-fluent-icons-font)
-- **尺寸单位**：逻辑像素（DIP），主程序自动处理 DPI 缩放
-- **动画时长**：展开 333ms，收起 250ms（主程序统一管理）
-- **DLL 放置**：`plugins/` 目录，主程序启动时自动扫描
+| 样例 | 内容 |
+|------|------|
+| `samples/HelloPlugin` | 代码构建 UI、私有依赖、设置页、定时器、完整清理、受管异常演示 |
+| `samples/XamlPlugin` | XAML 视图 + `PluginXaml.Load` + 逐帧形变动画 |
+| `samples/HardwareMonitor` | 真实功能插件：CPU/GPU/网络/帧率，自带 NuGet 依赖，设备选择，管理员提示 |
+
+---
+
+## 11. 从 1.x 迁移
+
+| 1.x | 2.x |
+|-----|-----|
+| `IIslandModule`（含 `Id`/`DisplayName`） | `IIslandPlugin` + `plugin.json` 提供元数据 |
+| `[IslandPlugin(...)]` | 删除，改用 `plugin.json` |
+| `InitializeAsync(IDynamicIslandApi)` | `InitializeAsync(IPluginContext)`（或重写 `OnInitializeAsync`） |
+| `Api.SetLiveContent(Id, content)` | `Context.Island.SetContent(content)` |
+| `Api.Settings`（全局键） | `Context.Settings`（自动加 `<id>.` 前缀，旧键名不变） |
+| `Api.Settings.Changed += …` | `Context.OnSettingsChanged(key, handler)` 或 `Register(...)` 包装 |
+| `Api.Dispatcher.CreateTimer()` | `Context.CreateTimer(...)`（自动随停用释放） |
+| 根目录散装 `*.dll` | `plugins/<id>/` 目录或 `.lwp` 包 |
+
+旧插件不迁移就不会被加载，并会在「插件管理」里提示检测到旧格式 DLL。
+
+---
+
+## 12. 故障排查
+
+| 现象/日志 | 原因 |
+|-----------|------|
+| 程序集里没有找到 IIslandPlugin 实现 | 入口类不是 `public sealed`、抽象、或缺无参构造 |
+| 缺少依赖程序集：xxx | 依赖没复制到插件目录（见 §6）或 deps.json 缺失 |
+| 插件针对 WinIsland.Core x.y 构建，与宿主不兼容 | SDK 大版本不一致，用 SDK 2.x 重新编译 |
+| 已忽略调用 xxx：插件当前状态为 已停用 | 停用后仍有回调（定时器/网络回调），属正常保护 |
+| 形态动画执行失败 | 插件动画抛异常（多为 §8 的 Storyboard 问题），宿主已忽略并记日志 |
+| 帧率显示 `--` | 读取前台窗口帧率需要**以管理员身份运行 WinIsland**（ETW）；普通权限下显示桌面合成帧率 |

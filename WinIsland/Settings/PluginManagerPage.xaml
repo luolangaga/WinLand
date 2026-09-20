@@ -13,28 +13,19 @@
             Margin="0,0,0,12"
             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
             Style="{StaticResource CaptionTextBlockStyle}"
-            Text="管理灵动岛功能插件，加载外部 DLL 或禁用已有模块" />
+            Text="插件以 plugins/&lt;id&gt;/ + plugin.json（或 .lwp 插件包）形式提供，启用/禁用会即时生效且不留残留" />
 
-        <Border Style="{StaticResource SettingsCardStyle}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Spacing="2" VerticalAlignment="Center">
-                    <TextBlock Text="加载插件" />
-                    <TextBlock
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="选择一个 DLL 文件加载为灵动岛插件" />
-                </StackPanel>
-                <Button
-                    x:Name="LoadPluginButton"
-                    Grid.Column="1"
-                    Click="LoadPlugin_Click"
-                    Content="浏览 DLL..." />
-            </Grid>
-        </Border>
+        <InfoBar
+            x:Name="WarningBar"
+            IsClosable="True"
+            IsOpen="False"
+            Severity="Warning"
+            Title="插件目录提示" />
+
+        <InfoBar
+            x:Name="ResultBar"
+            IsClosable="True"
+            IsOpen="False" />
 
         <Border Style="{StaticResource SettingsCardStyle}">
             <Grid>
@@ -50,11 +41,19 @@
                         Style="{StaticResource CaptionTextBlockStyle}"
                         Text="" />
                 </StackPanel>
-                <Button
-                    x:Name="OpenFolderButton"
+                <StackPanel
                     Grid.Column="1"
-                    Click="OpenFolder_Click"
-                    Content="打开文件夹" />
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <Button
+                        x:Name="InstallButton"
+                        Click="Install_Click"
+                        Content="安装插件包..." />
+                    <Button
+                        x:Name="OpenFolderButton"
+                        Click="OpenFolder_Click"
+                        Content="打开文件夹" />
+                </StackPanel>
             </Grid>
         </Border>
 

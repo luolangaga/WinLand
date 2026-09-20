@@ -1,80 +1,97 @@
+using Windows.Devices.Power;
 using Windows.System.Power;
 using WinIsland.Core;
 using WinBattery = Windows.Devices.Power.Battery;
 
 namespace WinIsland.Modules.Battery;
 
-public sealed class BatteryModule : IIslandModule
+public sealed class BatteryPlugin : IslandPluginBase
 {
-    public string Id => "battery";
-    public string DisplayName => "充电监控";
-
-    private IDynamicIslandApi _api = null!;
     private BatteryViewModel _vm = null!;
     private IslandLiveContent _content = null!;
     private bool _enabled;
-    private bool _liveShown;
     private bool _wasPlugged;
     private WinBattery? _battery;
 
     public string StatusText { get; private set; } = "等待电池状态...";
 
-    public async Task InitializeAsync(IDynamicIslandApi api)
+    protected override Task OnInitializeAsync()
     {
-        _api = api;
-        _enabled = api.Settings.Get("battery.enabled", true);
-
+        _enabled = Settings.Get("enabled", true);
         _vm = new BatteryViewModel();
+        _content = BuildContent();
 
-        var islandView = new BatteryIslandView(_vm);
+        Context.Island.AddSettingsPage(new SettingsPageDescriptor(
+            "battery", Manifest.Name, "\uE857", () => new BatterySettingsPage(Context, this), 20));
 
-        _content = new IslandLiveContent
+        Context.OnSettingsChanged("enabled", () =>
         {
-            Priority = 50,
-            OwnerLabel = "充电监控",
-            OwnerGlyph = "\uE857",
-            OwnerAccent = Windows.UI.Color.FromArgb(255, 108, 203, 95),
-            MorphView = islandView,
-            CompactSize = new Windows.Foundation.Size(230, 40),
-            ExpandedSize = new Windows.Foundation.Size(420, 150),
-        };
+            _enabled = Settings.Get("enabled", true);
+            RefreshState();
+        });
 
-        api.AddSettingsPage(new SettingsPageDescriptor(
-            "battery", DisplayName, "\uE857", () => new BatterySettingsPage(api, this)));
-
-        api.Settings.Changed += key =>
-        {
-            if (key == "battery.enabled")
-            {
-                _enabled = _api.Settings.Get("battery.enabled", true);
-                RunOnUI(RefreshState);
-            }
-        };
-
-        PowerManager.BatteryStatusChanged += (_, _) => RunOnUI(RefreshState);
-        PowerManager.RemainingChargePercentChanged += (_, _) => RunOnUI(RefreshState);
-        PowerManager.PowerSupplyStatusChanged += (_, _) => RunOnUI(RefreshState);
+        PowerManager.BatteryStatusChanged += OnPowerManagerChanged;
+        PowerManager.RemainingChargePercentChanged += OnPowerManagerChanged;
+        PowerManager.PowerSupplyStatusChanged += OnPowerManagerChanged;
 
         try
         {
-            var aggBattery = WinBattery.AggregateBattery;
-            aggBattery.ReportUpdated += (_, _) => RunOnUI(OnBatteryReportUpdated);
-            _battery = aggBattery;
+            var aggregate = WinBattery.AggregateBattery;
+            aggregate.ReportUpdated += OnBatteryReportUpdated;
+            _battery = aggregate;
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Log.Warn($"无法订阅电池报告：{ex.Message}");
+        }
 
         RefreshState();
-
-        await Task.CompletedTask;
-    }
-
-    public Task ShutdownAsync()
-    {
-        SetLive(false);
         return Task.CompletedTask;
     }
 
-    private void OnBatteryReportUpdated()
+    protected override Task OnShutdownAsync()
+    {
+        PowerManager.BatteryStatusChanged -= OnPowerManagerChanged;
+        PowerManager.RemainingChargePercentChanged -= OnPowerManagerChanged;
+        PowerManager.PowerSupplyStatusChanged -= OnPowerManagerChanged;
+
+        if (_battery != null)
+        {
+            try
+            {
+                _battery.ReportUpdated -= OnBatteryReportUpdated;
+            }
+            catch
+            {
+            }
+
+            _battery = null;
+        }
+
+        SetContent(null);
+        return Task.CompletedTask;
+    }
+
+    internal bool IsEnabled => _enabled;
+
+    private IslandLiveContent BuildContent() => new()
+    {
+        Priority = 50,
+        OwnerLabel = "充电监控",
+        OwnerGlyph = "\uE857",
+        OwnerAccent = Windows.UI.Color.FromArgb(255, 108, 203, 95),
+        MorphView = new BatteryIslandView(_vm),
+        CompactSize = new Windows.Foundation.Size(230, 40),
+        ExpandedSize = new Windows.Foundation.Size(420, 150),
+    };
+
+    private void SetLive(bool show) => SetContent(show ? _content : null);
+
+    private void OnPowerManagerChanged(object? sender, object e) => RunOnUI(RefreshState);
+
+    private void OnBatteryReportUpdated(WinBattery sender, object args) => RunOnUI(UpdateChargePower);
+
+    private void UpdateChargePower()
     {
         if (_battery == null) return;
 
@@ -82,13 +99,14 @@ public sealed class BatteryModule : IIslandModule
         {
             var report = _battery.GetReport();
             var chargeRate = report.ChargeRateInMilliwatts;
-
             if (chargeRate.HasValue && chargeRate.Value > 0)
             {
                 _vm.ChargePower = chargeRate.Value / 1000.0;
             }
         }
-        catch { }
+        catch
+        {
+        }
 
         UpdateStatusText();
     }
@@ -107,11 +125,11 @@ public sealed class BatteryModule : IIslandModule
             _vm.Percent = percent;
             _vm.IsCharging = isPlugged;
 
-            OnBatteryReportUpdated();
+            UpdateChargePower();
 
             if (isPlugged && !_wasPlugged)
             {
-                _api.SendMessage(new IslandMessage
+                Context.Island.ShowMessage(new IslandMessage
                 {
                     Title = "已连接充电器",
                     Text = $"当前电量 {percent}%",
@@ -122,7 +140,7 @@ public sealed class BatteryModule : IIslandModule
             }
             else if (!isPlugged && _wasPlugged)
             {
-                _api.SendMessage(new IslandMessage
+                Context.Island.ShowMessage(new IslandMessage
                 {
                     Title = "已断开充电器",
                     Text = $"当前电量 {percent}%",
@@ -133,10 +151,7 @@ public sealed class BatteryModule : IIslandModule
 
             _wasPlugged = isPlugged;
 
-            if (_enabled && isPlugged)
-                SetLive(true);
-            else
-                SetLive(false);
+            SetLive(_enabled && isPlugged);
         }
         catch
         {
@@ -169,20 +184,5 @@ public sealed class BatteryModule : IIslandModule
             _vm.StatusText = $"电池 {percent}%";
             StatusText = $"未充电 · 电量 {percent}%";
         }
-    }
-
-    private void SetLive(bool show)
-    {
-        if (show == _liveShown) return;
-        _liveShown = show;
-        _api.SetLiveContent(Id, show ? _content : null);
-    }
-
-    private void RunOnUI(Action action)
-    {
-        if (_api.Dispatcher.HasThreadAccess)
-            action();
-        else
-            _api.Dispatcher.TryEnqueue(() => action());
     }
 }
