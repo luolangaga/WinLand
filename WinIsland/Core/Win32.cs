@@ -211,22 +211,17 @@ internal static partial class Win32
     // 当前点击区域（由 IslandWindow 更新）。区域外返回 HTTRANSPARENT 穿透点击。
     private static nint _hitRgn;
 
-    /// <summary>更新点击穿透区域。区域内正常响应，区域外穿透到下层窗口。
-    /// 调用方无需释放 hRgn，由 SetHitRegion 接管所有权。</summary>
+    /// <summary>更新点击穿透区域：区域内正常响应，区域外穿透到下层窗口。
+    /// 调用方无需释放 hRgn，由 SetHitRegion 接管所有权。
+    /// 空句柄会被忽略（保留上一份有效区域）——区域为空时整块窗口都参与命中测试，
+    /// 会让透明画布区域拦截点击。</summary>
     public static void SetHitRegion(nint hRgn)
     {
+        if (hRgn == nint.Zero) return;
+
         var old = _hitRgn;
         _hitRgn = hRgn;
         if (old != nint.Zero && old != hRgn)
-            DeleteObject(old);
-    }
-
-    /// <summary>清除点击穿透区域（窗口全部可点击）。</summary>
-    public static void ClearHitRegion()
-    {
-        var old = _hitRgn;
-        _hitRgn = nint.Zero;
-        if (old != nint.Zero)
             DeleteObject(old);
     }
 

@@ -25,6 +25,8 @@ public sealed partial class IslandWindow : Window
     private static readonly Size IdleSize = new(128, 34);
     private static readonly TimeSpan ExpandDuration = TimeSpan.FromMilliseconds(333);
     private static readonly TimeSpan CollapseDuration = TimeSpan.FromMilliseconds(250);
+    private const double MinCanvasWidth = 420;
+    private static readonly Size MaxMessageSize = new(280, 40);
 
     private readonly SettingsService _settings;
     private readonly nint _hwnd;
@@ -50,6 +52,15 @@ public sealed partial class IslandWindow : Window
     private Storyboard? _sizeStoryboard;
     private int _animVersion;
     private readonly RectangleGeometry _clip = new();
+
+    // 窗口画布（内容区，逻辑像素，含透明 padding）。只在内容集合变化时扩容，永不缩小 ——
+    // 悬停展开/收起全程不改窗口几何，否则 DWM 会用上一帧（旧客户区坐标）合成新窗口矩形，
+    // 出现偏移 Δw/2 的「副本残影」。
+    private Size _canvas = new(MinCanvasWidth + Pad * 2, IdleSize.Height + Pad * 2);
+    // 最近一次应用（或将应用）到窗口的点击穿透矩形（物理像素），用于逐帧去重。
+    private List<(int x1, int y1, int x2, int y2)> _hitRects = new();
+    // 最近一次应用窗口尺寸时使用的缩放比，用于识别 DPI 变化。
+    private double _appliedScale;
 
     // 主活动（优先级最高）
     private IslandLiveContent? ActiveLive => _live.Count > 0 ? _live[0].Content : null;
@@ -84,6 +95,19 @@ public sealed partial class IslandWindow : Window
         IslandRoot.SizeChanged += (_, e) =>
         {
             _clip.Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height);
+            // 尺寸动画逐帧改变实际大小，点击穿透区域必须同步跟随
+            UpdateHitRegion();
+        };
+
+        // DPI 变化时画布的逻辑尺寸不变，但物理像素尺寸需要重新应用（缩放、位置、命中区域）
+        RootGrid.Loaded += (_, _) =>
+        {
+            if (RootGrid.XamlRoot is not { } root) return;
+            root.Changed += (_, _) =>
+            {
+                if (Math.Abs(Scale - _appliedScale) < 0.001) return;
+                ApplyCanvasBounds();
+            };
         };
 
         _tempTimer = DispatcherQueue.CreateTimer();
@@ -101,7 +125,7 @@ public sealed partial class IslandWindow : Window
         IslandRoot.Width = IdleSize.Width;
         IslandRoot.Height = IdleSize.Height;
         ContentHost.Content = _idleContent;
-        ApplyWindowBounds(IdleSize);
+        EnsureCanvas();
     }
 
     #region 公开操作（由 IslandService 在 UI 线程调用）
@@ -114,6 +138,9 @@ public sealed partial class IslandWindow : Window
             _live.Add((owner, content));
             _live.Sort((a, b) => b.Content.Priority.CompareTo(a.Content.Priority));
         }
+
+        // 内容集合变化时才允许扩容画布，之后悬停展开/收起不再动窗口几何
+        EnsureCanvas();
 
         if (_tempContent != null)
         {
@@ -146,6 +173,7 @@ public sealed partial class IslandWindow : Window
         }
 
         ContentHost.Content = content;
+        EnsureCanvas();
         AnimateIslandSize(size, CollapseDuration, isTemporary: true);
         SetCornerRadius(size.Height / 2);
         UpdateVisibility();
@@ -156,6 +184,7 @@ public sealed partial class IslandWindow : Window
         if (_tempContent == null) return;
         _tempTimer.Stop();
         _tempContent = null;
+        EnsureCanvas();
         TransitionToLiveState();
         UpdateVisibility();
     }
@@ -172,7 +201,8 @@ public sealed partial class IslandWindow : Window
     public void RefreshFromSettings()
     {
         UpdateVisibility();
-        ApplyWindowBounds(_currentTotalSize, growOnly: false);
+        EnsureCanvas();
+        ApplyCanvasBounds();
     }
 
     public void ShowIsland()
@@ -184,13 +214,13 @@ public sealed partial class IslandWindow : Window
 
     #region 状态机
 
-    private Size ComputeTotalSize()
+    private Size ComputeTotalSize(bool expanded)
     {
         var live = ActiveLive;
         if (live == null) return IdleSize;
 
         double mainW, mainH;
-        if (_expanded)
+        if (expanded)
         {
             mainW = live.ExpandedSize.Width;
             mainH = live.ExpandedSize.Height;
@@ -202,7 +232,7 @@ public sealed partial class IslandWindow : Window
         }
 
         var queue = QueueItems;
-        if (_expanded && queue.Count > 0)
+        if (expanded && queue.Count > 0)
         {
             int count = Math.Min(queue.Count, MaxExpandedItems - 1);
             double queueH = 0;
@@ -217,6 +247,39 @@ public sealed partial class IslandWindow : Window
         }
 
         return new Size(mainW, mainH);
+    }
+
+    /// <summary>
+    /// 当前内容集合在「空闲 / 临时消息 / 紧凑 / 展开 + 队列」各状态下所需的最大画布尺寸（含透明 padding）。
+    /// </summary>
+    private Size ComputeCanvasFootprint()
+    {
+        double w = Math.Max(MinCanvasWidth, Math.Max(IdleSize.Width, MaxMessageSize.Width));
+        double h = Math.Max(IdleSize.Height, MaxMessageSize.Height);
+
+        foreach (var (_, content) in _live)
+        {
+            w = Math.Max(w, Math.Max(content.CompactSize.Width, content.ExpandedSize.Width));
+            h = Math.Max(h, Math.Max(content.CompactSize.Height, content.ExpandedSize.Height));
+        }
+
+        var expandedTotal = ComputeTotalSize(expanded: true);
+        w = Math.Max(w, expandedTotal.Width);
+        h = Math.Max(h, expandedTotal.Height);
+
+        return new Size(w + Pad * 2, h + Pad * 2);
+    }
+
+    /// <summary>预留画布：只在内容集合需要更大空间时扩容，永不缩小。常规路径为 no-op。</summary>
+    private void EnsureCanvas()
+    {
+        var need = ComputeCanvasFootprint();
+        double w = Math.Max(_canvas.Width, need.Width);
+        double h = Math.Max(_canvas.Height, need.Height);
+        if (_windowPhysW > 0 && w == _canvas.Width && h == _canvas.Height) return;
+
+        _canvas = new Size(w, h);
+        ApplyCanvasBounds();
     }
 
     private void TransitionToLiveState()
@@ -284,6 +347,7 @@ public sealed partial class IslandWindow : Window
         if (queue.Count == 0)
         {
             QueuePanel.Visibility = Visibility.Collapsed;
+            UpdateHitRegion(force: true);
             return;
         }
 
@@ -316,6 +380,7 @@ public sealed partial class IslandWindow : Window
         }
 
         QueuePanel.Visibility = Visibility.Visible;
+        UpdateHitRegion(force: true);
     }
 
     /// <summary>安全拆卸队列：先停止 Storyboard，把 MorphView.View 从 Border 中取出，
@@ -354,6 +419,8 @@ public sealed partial class IslandWindow : Window
         {
             ContentHost.Content = live.MorphView.View;
         }
+
+        UpdateHitRegion(force: true);
     }
 
     private static UIElement BuildFallbackLabel(string owner, IslandLiveContent content)
@@ -469,20 +536,30 @@ public sealed partial class IslandWindow : Window
 
     private void AnimateIslandSize(Size islandTarget, TimeSpan duration, bool isTemporary = false)
     {
-        var totalTarget = isTemporary ? islandTarget : ComputeTotalSize();
+        var totalTarget = isTemporary ? islandTarget : ComputeTotalSize(_expanded);
+        bool unchanged = islandTarget == _currentIsland && _sizeStoryboard == null;
 
-        if (islandTarget == _currentIsland && _sizeStoryboard == null)
+        // 这里只做兜底：正常路径下画布已由内容集合变化时预留好。
+        // 尺寸动画期间绝不 resize 窗口 —— 否则客户区宽度变化会让 DWM 用上一帧
+        // （旧客户区坐标）合成新窗口矩形，出现偏移 Δw/2 的副本残影。
+        EnsureCanvas();
+
+        var previousIsland = _currentIsland;
+        _currentIsland = islandTarget;
+        _currentTotalSize = totalTarget;
+
+        if (unchanged)
         {
             IslandRoot.Width = islandTarget.Width;
             IslandRoot.Height = islandTarget.Height;
-            ApplyWindowBounds(totalTarget, growOnly: false);
+            UpdateHitRegion();
             return;
         }
 
         var fromW = double.IsNaN(IslandRoot.ActualWidth) || IslandRoot.ActualWidth <= 0
-            ? _currentIsland.Width : IslandRoot.ActualWidth;
+            ? previousIsland.Width : IslandRoot.ActualWidth;
         var fromH = double.IsNaN(IslandRoot.ActualHeight) || IslandRoot.ActualHeight <= 0
-            ? _currentIsland.Height : IslandRoot.ActualHeight;
+            ? previousIsland.Height : IslandRoot.ActualHeight;
         if (_sizeStoryboard != null)
         {
             _sizeStoryboard.Stop();
@@ -491,15 +568,6 @@ public sealed partial class IslandWindow : Window
             IslandRoot.Height = fromH;
         }
         var version = ++_animVersion;
-
-        var currentTotal = _currentTotalSize;
-        var unionTotal = new Size(
-            Math.Max(currentTotal.Width, totalTarget.Width),
-            Math.Max(currentTotal.Height, totalTarget.Height));
-        ApplyWindowBounds(unionTotal, growOnly: true);
-
-        _currentIsland = islandTarget;
-        _currentTotalSize = totalTarget;
 
         var sb = new Storyboard();
         var easing = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.45 };
@@ -512,7 +580,7 @@ public sealed partial class IslandWindow : Window
             _sizeStoryboard = null;
             IslandRoot.Width = islandTarget.Width;
             IslandRoot.Height = islandTarget.Height;
-            ApplyWindowBounds(totalTarget, growOnly: false);
+            UpdateHitRegion();
         };
         _sizeStoryboard = sb;
         sb.Begin();
@@ -543,14 +611,15 @@ public sealed partial class IslandWindow : Window
 
     private double Scale => Win32.GetDpiForWindow(_hwnd) / 96.0;
 
-    private void ApplyWindowBounds(Size totalLogical, bool growOnly = false)
+    /// <summary>
+    /// 应用预留画布的尺寸与位置。只在内容集合变化（活动上岛/临时消息）或 DPI 变化时调用，
+    /// 绝不在悬停展开/收起动画中调用 —— 见 <see cref="AnimateIslandSize"/>。
+    /// </summary>
+    private void ApplyCanvasBounds()
     {
         var s = Scale;
-        int neededW = (int)Math.Round((totalLogical.Width + Pad * 2) * s);
-        int neededH = (int)Math.Round((totalLogical.Height + Pad * 2) * s);
-
-        int w = growOnly ? Math.Max(neededW, _windowPhysW) : neededW;
-        int h = growOnly ? Math.Max(neededH, _windowPhysH) : neededH;
+        int w = (int)Math.Round(_canvas.Width * s);
+        int h = (int)Math.Round(_canvas.Height * s);
 
         var area = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
         double topOffset = _settings.Get("island.topOffset", 6.0);
@@ -560,109 +629,70 @@ public sealed partial class IslandWindow : Window
         bool sizeChanged = w != _windowPhysW || h != _windowPhysH;
         _windowPhysW = w;
         _windowPhysH = h;
+        _appliedScale = s;
 
         AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(x, y, w, h));
 
         if (sizeChanged)
             Win32.RemoveDwmBorder(_hwnd);
 
-        // 关键：更新点击穿透区域，让透明 padding 区的点击穿透到下层窗口。
-        // 用 WM_NCHITTEST + HTTRANSPARENT，不影响绘制。
-        ApplyHitRegion();
+        UpdateHitRegion(force: true);
     }
 
     /// <summary>
-    /// 用 GDI 区域标记「可见岛屿」范围，通过 WM_NCHITTEST 子类化让区域外点击穿透。
-    /// 不影响绘制——只影响点击/触控命中测试。
+    /// 用岛屿的「真实布局矩形」标记可点击范围，区域外在 WM_NCHITTEST 返回 HTTRANSPARENT。
+    /// 必须跟随实际布局（尺寸动画中间帧也会变），且绝不能置空 ——
+    /// 空/未设置的区域会让整块透明画布拦截点击。
     /// </summary>
-    private void ApplyHitRegion()
+    private void UpdateHitRegion(bool force = false)
     {
         var s = Scale;
-        var physW = _windowPhysW;
+        var rects = new List<(int x1, int y1, int x2, int y2)>(MaxExpandedItems);
 
-        var total = _currentTotalSize;
-        double totalW = total.Width * s;
-        double mainCx = (physW - totalW) / 2.0;
-        double mainY = Pad * s;
-
-        // 临时内容：直接用 _currentIsland（临时态 totalSize 等于 island 尺寸）
-        if (_tempContent != null)
-        {
-            double iw = _currentIsland.Width * s;
-            double ih = _currentIsland.Height * s;
-            double ix = mainCx + (totalW - iw) / 2.0;
-            SetHitRgn((int)Math.Round(ix), (int)Math.Round(mainY),
-                       (int)Math.Round(ix + iw), (int)Math.Round(mainY + ih));
-            return;
-        }
-
-        var live = ActiveLive;
-        if (live == null)
-        {
-            // 空闲态：只有主岛
-            double iw = IdleSize.Width * s;
-            double ih = IdleSize.Height * s;
-            double ix = mainCx + (totalW - iw) / 2.0;
-            SetHitRgn((int)Math.Round(ix), (int)Math.Round(mainY),
-                       (int)Math.Round(ix + iw), (int)Math.Round(mainY + ih));
-            return;
-        }
-
-        // 展开态需要主岛 + 队列小岛的并集；紧凑态只有主岛
-        double mainW, mainH;
-        if (_expanded)
-        {
-            mainW = live.ExpandedSize.Width * s;
-            mainH = live.ExpandedSize.Height * s;
-        }
-        else
-        {
-            mainW = live.CompactSize.Width * s;
-            mainH = live.CompactSize.Height * s;
-        }
-        double mainX = mainCx + (totalW - mainW) / 2.0;
-
-        var queue = QueueItems;
-        if (!_expanded || queue.Count == 0)
-        {
-            SetHitRgn((int)Math.Round(mainX), (int)Math.Round(mainY),
-                       (int)Math.Round(mainX + mainW), (int)Math.Round(mainY + mainH));
-            return;
-        }
-
-        // 主岛 + 每个队列小岛（垂直堆叠，间距 QueueSpacing，映射到物理像素）
-        int count = Math.Min(queue.Count, MaxExpandedItems - 1);
-        var rects = new List<(int x1, int y1, int x2, int y2)>(count + 1);
+        // 主岛（空闲 / 活动 / 临时消息都走这里）：以实际布局尺寸为准
+        double iw = IslandRoot.ActualWidth > 0 ? IslandRoot.ActualWidth : _currentIsland.Width;
+        double ih = IslandRoot.ActualHeight > 0 ? IslandRoot.ActualHeight : _currentIsland.Height;
+        double ix = (_windowPhysW - iw * s) / 2.0;
+        double iy = Pad * s;
         rects.Add((
-            (int)Math.Round(mainX), (int)Math.Round(mainY),
-            (int)Math.Round(mainX + mainW), (int)Math.Round(mainY + mainH)));
+            (int)Math.Round(ix), (int)Math.Round(iy),
+            (int)Math.Round(ix + iw * s), (int)Math.Round(iy + ih * s)));
 
-        double cursorY = mainY + mainH + QueueSpacing * s;
-        double queueMaxW = totalW;
-        for (int i = 0; i < count; i++)
+        // 队列小岛：各子元素的实际布局矩形（DIP → 物理）
+        foreach (var child in QueuePanel.Children)
         {
-            var q = queue[i].Content;
-            double qw = q.ExpandedSize.Width * s;
-            double qh = q.ExpandedSize.Height * s;
-            double qx = mainCx + (queueMaxW - qw) / 2.0;
+            if (child is not FrameworkElement fe || fe.ActualWidth <= 0 || fe.ActualHeight <= 0)
+                continue;
+
+            var box = fe.TransformToVisual(RootGrid)
+                        .TransformBounds(new Rect(0, 0, fe.ActualWidth, fe.ActualHeight));
             rects.Add((
-                (int)Math.Round(qx), (int)Math.Round(cursorY),
-                (int)Math.Round(qx + qw), (int)Math.Round(cursorY + qh)));
-            cursorY += qh + QueueSpacing * s;
+                (int)Math.Round(box.X * s), (int)Math.Round(box.Y * s),
+                (int)Math.Round((box.X + box.Width) * s), (int)Math.Round((box.Y + box.Height) * s)));
         }
 
+        if (!force && SameRects(_hitRects, rects)) return;
+        _hitRects = rects;
         SetHitRgn(rects);
     }
 
-    private void SetHitRgn(int x1, int y1, int x2, int y2)
+    private static bool SameRects(
+        IReadOnlyList<(int x1, int y1, int x2, int y2)> a,
+        IReadOnlyList<(int x1, int y1, int x2, int y2)> b)
     {
-        var rgn = Win32.CreateRectRegion(x1, y1, x2, y2);
-        Win32.SetHitRegion(rgn);
+        if (a.Count != b.Count) return false;
+        for (int i = 0; i < a.Count; i++)
+        {
+            if (a[i] != b[i]) return false;
+        }
+        return true;
     }
 
     private void SetHitRgn(IReadOnlyList<(int x1, int y1, int x2, int y2)> rects)
     {
-        if (rects.Count == 0) { Win32.ClearHitRegion(); return; }
+        // 空集合绝不能清空命中区域：空区域等于整块透明画布拦截点击
+        if (rects.Count == 0) return;
+
         var first = Win32.CreateRectRegion(rects[0].x1, rects[0].y1, rects[0].x2, rects[0].y2);
         if (rects.Count == 1) { Win32.SetHitRegion(first); return; }
         for (int i = 1; i < rects.Count; i++)

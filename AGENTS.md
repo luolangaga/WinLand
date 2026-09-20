@@ -89,6 +89,14 @@ Achieving a truly transparent borderless window requires a specific sequence:
 
 Do not simplify or reorder these steps — each layer prevents a specific white-border regression.
 
+## Window Geometry Invariants (do not break)
+
+The window is a big transparent canvas with the island centered at the top. Three rules keep it free of "ghost copy" artifacts:
+
+1. **The canvas is reserved, not animated.** `IslandWindow.EnsureCanvas` keeps a grow-only canvas: the width is fixed at `max(420, content widths, 280) + 2*Pad`, the height is reserved for the current live set's expanded footprint (main island + queue). It only resizes when the live content set changes.
+2. **Never resize the HWND inside a hover expand/collapse.** `AnimateIslandSize` must not call `AppWindow.MoveAndResize`. Changing the client width while content is animating makes DWM composite the previous frame (still at old client coordinates) into the new window rect → the island shows an offset copy for one frame (left on expand, right on collapse, offset = Δw/2). Height-only changes are harmless — the island is top-anchored and the window's y never changes with height.
+3. **The click-through region must follow the real layout and must never be empty.** `UpdateHitRegion` (driven by `IslandRoot.SizeChanged` + queue rebuilds) marks the island's actual rects for `WM_NCHITTEST` → `HTTRANSPARENT`. An unset/empty region (`_hitRgn == 0`) makes the *entire* transparent canvas swallow clicks — that was a past bug, so `Win32.SetHitRegion` ignores null handles and no API clears the region anymore.
+
 ## No Tests / No CI
 
 No test project, no CI workflows, no lint/typecheck commands exist. Verify by building and running the app.
