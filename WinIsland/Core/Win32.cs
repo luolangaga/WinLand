@@ -71,6 +71,9 @@ internal static partial class Win32
     private static partial nint CreateRectRgn(int x1, int y1, int x2, int y2);
 
     [LibraryImport("gdi32.dll")]
+    private static partial nint CreateRoundRectRgn(int x1, int y1, int x2, int y2, int ellipseW, int ellipseH);
+
+    [LibraryImport("gdi32.dll")]
     private static partial int CombineRgn(nint hDest, nint hSrc1, nint hSrc2, int combineMode);
 
     [LibraryImport("gdi32.dll")]
@@ -79,10 +82,83 @@ internal static partial class Win32
 
     [LibraryImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool PatBlt(nint hdc, int x, int y, int w, int h, uint rop);
+
+    [LibraryImport("user32.dll")]
+    private static partial nint GetDC(nint hWnd);
+
+    [LibraryImport("user32.dll")]
+    private static partial int ReleaseDC(nint hWnd, nint hDC);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetClientRect(nint hWnd, out RECT lpRect);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    private const uint BLACKNESS = 0x00000042;
+    private const int GCLP_HBRBACKGROUND = -10;
+
+    [LibraryImport("user32.dll", EntryPoint = "SetClassLongPtrW", SetLastError = true)]
+    private static partial nint SetClassLongPtr(nint hWnd, int nIndex, nint dwNewLong);
+
+    /// <summary>
+    /// 去掉窗口类的背景画刷：否则窗口被擦除时会用类背景色（不透明白）填充，
+    /// 凡是被窗口形状覆盖、而 XAML 内容没有画到的像素都会变成白块。
+    /// </summary>
+    public static void ClearWindowBackgroundBrush(nint hwnd)
+        => SetClassLongPtr(hwnd, GCLP_HBRBACKGROUND, nint.Zero);
+
+    /// <summary>
+    /// 把窗口客户区擦成「全 0」——BLACKNESS 会写 0（含 alpha=0），即完全透明像素。
+    /// 用于父窗口表面：这样形状里没被 XAML 内容覆盖的区域是透明的，而不是白色。
+    /// </summary>
+    public static void ClearClientTransparent(nint hwnd)
+    {
+        if (!GetClientRect(hwnd, out var rc)) return;
+
+        var hdc = GetDC(hwnd);
+        if (hdc == nint.Zero) return;
+        PatBlt(hdc, rc.Left, rc.Top, rc.Right - rc.Left, rc.Bottom - rc.Top, BLACKNESS);
+        ReleaseDC(hwnd, hdc);
+    }
+
+    [LibraryImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool PtInRegion(nint hRgn, int x, int y);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetWindowRgn(nint hWnd, nint hRgn, [MarshalAs(UnmanagedType.Bool)] bool bRedraw);
+
+    /// <summary>
+    /// 设定窗口「形状」：区域之外的像素不属于这个窗口，既不绘制也不参与命中测试，
+    /// 点击/触摸因此会真正落到下层窗口（跨进程有效）。
+    /// 这是点击穿透唯一可靠的机制 —— WM_NCHITTEST 返回 HTTRANSPARENT 只对同线程窗口生效。
+    /// 调用成功后系统接管区域所有权（不要 DeleteObject）；失败则就地释放。
+    /// bRedraw 传 false：XAML 内容每帧自绘，不需要系统再额外触发整窗重绘。
+    /// </summary>
+    public static bool ApplyWindowShape(nint hwnd, nint hRgn, bool redraw = false)
+    {
+        bool ok = SetWindowRgn(hwnd, hRgn, redraw);
+        if (!ok && hRgn != nint.Zero)
+            DeleteObject(hRgn);
+        return ok;
+    }
 
     /// <summary>创建矩形 GDI 区域。需 DeleteObject 释放。</summary>
     public static nint CreateRectRegion(int x1, int y1, int x2, int y2) => CreateRectRgn(x1, y1, x2, y2);
+
+    /// <summary>创建圆角矩形 GDI 区域（ellipseW/H 为两倍圆角半径，物理像素）。需 DeleteObject 释放。</summary>
+    public static nint CreateRoundRectRegion(int x1, int y1, int x2, int y2, int ellipseW, int ellipseH)
+        => CreateRoundRectRgn(x1, y1, x2, y2, Math.Max(0, ellipseW), Math.Max(0, ellipseH));
 
     /// <summary>释放 GDI 区域。</summary>
     public static void DeleteRegion(nint hRgn) => DeleteObject(hRgn);
@@ -164,6 +240,9 @@ internal static partial class Win32
         ex |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST;
         SetWindowLongPtr(hwnd, GWL_EXSTYLE, (nint)ex);
 
+        // 去掉类背景画刷：窗口表面必须保持透明，任何默认擦除都会画成不透明白色
+        ClearWindowBackgroundBrush(hwnd);
+
         // 样式改变后必须 SWP_FRAMECHANGED，并强制进入 TOPMOST 层
         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
@@ -189,6 +268,7 @@ internal static partial class Win32
     private const uint WM_NCCALCSIZE = 0x0083;
     private const uint WM_NCPAINT = 0x0085;
     private const uint WM_NCHITTEST = 0x0084;
+    private const uint WM_ERASEBKGND = 0x0014;
     /// <summary>WS_CAPTION|WS_SYSMENU|WS_THICKFRAME|WS_MINIMIZEBOX|WS_MAXIMIZEBOX</summary>
     private const uint FrameStyleMask = 0x00CF0000;
     /// <summary>HTTRANSPARENT：让点击穿透到下层窗口。</summary>
@@ -236,6 +316,16 @@ internal static partial class Win32
         if (uMsg == WM_NCPAINT)
         {
             return 0;
+        }
+        // 拦截 WM_ERASEBKGND：用「透明擦除」取代默认的类背景画刷（不透明白）。
+        // 父窗口表面必须始终是 alpha=0 —— 否则窗口形状里任何 XAML 内容没覆盖到的像素
+        // （动画中形状比内容早一帧、圆角外侧等）都会显示成白块/白闪。
+        if (uMsg == WM_ERASEBKGND)
+        {
+            var hdc = wParam;
+            if (hdc != nint.Zero && GetClientRect(hWnd, out var rc))
+                PatBlt(hdc, rc.Left, rc.Top, rc.Right - rc.Left, rc.Bottom - rc.Top, BLACKNESS);
+            return 1;
         }
         if (uMsg == WM_STYLECHANGING && wParam == GWL_STYLE && lParam != 0)
         {

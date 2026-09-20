@@ -57,8 +57,8 @@ public sealed partial class IslandWindow : Window
     // 悬停展开/收起全程不改窗口几何，否则 DWM 会用上一帧（旧客户区坐标）合成新窗口矩形，
     // 出现偏移 Δw/2 的「副本残影」。
     private Size _canvas = new(MinCanvasWidth + Pad * 2, IdleSize.Height + Pad * 2);
-    // 最近一次应用（或将应用）到窗口的点击穿透矩形（物理像素），用于逐帧去重。
-    private List<(int x1, int y1, int x2, int y2)> _hitRects = new();
+    // 最近一次应用（或将应用）到窗口的点击穿透形状（物理像素），用于逐帧去重。
+    private List<ShapeRect> _hitRects = new();
     // 最近一次应用窗口尺寸时使用的缩放比，用于识别 DPI 变化。
     private double _appliedScale;
 
@@ -636,49 +636,59 @@ public sealed partial class IslandWindow : Window
         if (sizeChanged)
             Win32.RemoveDwmBorder(_hwnd);
 
+        // resize 后新长出来的表面默认是不透明白，擦成透明，避免被形状暴露时闪白
+        Win32.ClearClientTransparent(_hwnd);
+
         UpdateHitRegion(force: true);
     }
 
     /// <summary>
-    /// 用岛屿的「真实布局矩形」标记可点击范围，区域外在 WM_NCHITTEST 返回 HTTRANSPARENT。
-    /// 必须跟随实际布局（尺寸动画中间帧也会变），且绝不能置空 ——
-    /// 空/未设置的区域会让整块透明画布拦截点击。
+    /// 把岛屿的「真实布局形状」写入窗口形状（SetWindowRgn）：形状之外不绘制也不参与命中测试，
+    /// 透明画布区域的点击/触摸因此会真正落到下层窗口（跨进程有效）。
+    /// 形状按岛体的圆角生成 —— 若用矩形近似，圆角外侧那几块像素会被窗口表面填充成白色实块。
+    /// 必须跟随尺寸动画逐帧更新，且绝不能为空：没有形状时整块画布都会拦截点击。
     /// </summary>
     private void UpdateHitRegion(bool force = false)
     {
         var s = Scale;
-        var rects = new List<(int x1, int y1, int x2, int y2)>(MaxExpandedItems);
+        var rects = new List<ShapeRect>(MaxExpandedItems);
 
-        // 主岛（空闲 / 活动 / 临时消息都走这里）：以实际布局尺寸为准
+        // 主岛（空闲 / 活动 / 临时消息都走这里）：形状必须与岛体「当前渲染尺寸」严格一致。
+        // 绝不能取动画目标尺寸 —— 目标比内容多出来的那一圈会落进形状里，
+        // 由窗口表面填成不透明白色，切换瞬间就会闪白块。
         double iw = IslandRoot.ActualWidth > 0 ? IslandRoot.ActualWidth : _currentIsland.Width;
         double ih = IslandRoot.ActualHeight > 0 ? IslandRoot.ActualHeight : _currentIsland.Height;
         double ix = (_windowPhysW - iw * s) / 2.0;
         double iy = Pad * s;
-        rects.Add((
+        rects.Add(new ShapeRect(
             (int)Math.Round(ix), (int)Math.Round(iy),
-            (int)Math.Round(ix + iw * s), (int)Math.Round(iy + ih * s)));
+            (int)Math.Round(ix + iw * s), (int)Math.Round(iy + ih * s),
+            (int)Math.Round(IslandRoot.CornerRadius.TopLeft * s)));
 
-        // 队列小岛：各子元素的实际布局矩形（DIP → 物理）
+        // 队列小岛：各子元素的实际布局矩形与圆角（DIP → 物理）
         foreach (var child in QueuePanel.Children)
         {
-            if (child is not FrameworkElement fe || fe.ActualWidth <= 0 || fe.ActualHeight <= 0)
+            if (child is not Border card || card.ActualWidth <= 0 || card.ActualHeight <= 0)
                 continue;
 
-            var box = fe.TransformToVisual(RootGrid)
-                        .TransformBounds(new Rect(0, 0, fe.ActualWidth, fe.ActualHeight));
-            rects.Add((
+            var box = card.TransformToVisual(RootGrid)
+                          .TransformBounds(new Rect(0, 0, card.ActualWidth, card.ActualHeight));
+            rects.Add(new ShapeRect(
                 (int)Math.Round(box.X * s), (int)Math.Round(box.Y * s),
-                (int)Math.Round((box.X + box.Width) * s), (int)Math.Round((box.Y + box.Height) * s)));
+                (int)Math.Round((box.X + box.Width) * s), (int)Math.Round((box.Y + box.Height) * s),
+                (int)Math.Round(card.CornerRadius.TopLeft * s)));
         }
 
-        if (!force && SameRects(_hitRects, rects)) return;
+        if (rects.Count == 0 || (!force && SameRects(_hitRects, rects))) return;
         _hitRects = rects;
-        SetHitRgn(rects);
+
+        // 主机制：窗口形状 —— 跨进程、触控都生效的点击穿透
+        Win32.ApplyWindowShape(_hwnd, BuildRegion(rects));
+        // 兜底：WM_NCHITTEST 拦截（HTTRANSPARENT 只对同线程窗口有效，例如设置窗与岛重叠时）
+        Win32.SetHitRegion(BuildRegion(rects));
     }
 
-    private static bool SameRects(
-        IReadOnlyList<(int x1, int y1, int x2, int y2)> a,
-        IReadOnlyList<(int x1, int y1, int x2, int y2)> b)
+    private static bool SameRects(IReadOnlyList<ShapeRect> a, IReadOnlyList<ShapeRect> b)
     {
         if (a.Count != b.Count) return false;
         for (int i = 0; i < a.Count; i++)
@@ -688,21 +698,21 @@ public sealed partial class IslandWindow : Window
         return true;
     }
 
-    private void SetHitRgn(IReadOnlyList<(int x1, int y1, int x2, int y2)> rects)
+    /// <summary>把一组圆角矩形合并成单个 GDI 区域。调用方保证 rects 非空。</summary>
+    private static nint BuildRegion(IReadOnlyList<ShapeRect> rects)
     {
-        // 空集合绝不能清空命中区域：空区域等于整块透明画布拦截点击
-        if (rects.Count == 0) return;
-
-        var first = Win32.CreateRectRegion(rects[0].x1, rects[0].y1, rects[0].x2, rects[0].y2);
-        if (rects.Count == 1) { Win32.SetHitRegion(first); return; }
+        var first = Win32.CreateRoundRectRegion(rects[0].X1, rects[0].Y1, rects[0].X2, rects[0].Y2, rects[0].Radius * 2, rects[0].Radius * 2);
         for (int i = 1; i < rects.Count; i++)
         {
-            var next = Win32.CreateRectRegion(rects[i].x1, rects[i].y1, rects[i].x2, rects[i].y2);
+            var next = Win32.CreateRoundRectRegion(rects[i].X1, rects[i].Y1, rects[i].X2, rects[i].Y2, rects[i].Radius * 2, rects[i].Radius * 2);
             Win32.CombineRgnInPlace(first, next);
             Win32.DeleteRegion(next);
         }
-        Win32.SetHitRegion(first);
+        return first;
     }
+
+    /// <summary>形状用矩形（物理像素）：X1,Y1,X2,Y2 为外接矩形，Radius 为圆角半径。</summary>
+    private readonly record struct ShapeRect(int X1, int Y1, int X2, int Y2, int Radius);
 
     private void UpdateVisibility(bool force = false)
     {
@@ -717,6 +727,8 @@ public sealed partial class IslandWindow : Window
             _presenter.IsAlwaysOnTop = false;
             _presenter.IsAlwaysOnTop = true;
             Win32.MakeIslandStyle(_hwnd);
+            // MakeIslandStyle 里的 SWP_FRAMECHANGED 可能让窗口形状失效，重新断言一次
+            UpdateHitRegion(force: true);
         }
         else
         {
