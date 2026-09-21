@@ -230,7 +230,7 @@ public sealed class PluginInstance
         {
             _scope = null;
             scope.Revoke();
-            Fault("初始化", $"初始化失败：{ex.Message}", ex);
+            Fault("初始化", $"初始化失败：{DescribeLoadError(ex)}", ex);
         }
     }
 
@@ -490,12 +490,70 @@ public sealed class PluginInstance
     {
         ReflectionTypeLoadException typeLoad => "加载程序集类型失败：" + string.Join("；",
             typeLoad.LoaderExceptions.Where(e => e != null).Select(e => e!.Message).Distinct().Take(3)),
-        FileNotFoundException fileNotFound => $"缺少依赖程序集：{fileNotFound.FileName ?? fileNotFound.Message}",
+        FileNotFoundException fileNotFound => DescribeMissingAssembly(fileNotFound),
+        // 插件静态构造里触发的加载失败会被包一层，拆开才认得出是「缺依赖」还是「版本错配」
+        TypeInitializationException { InnerException: { } inner } => DescribeLoadError(inner),
         FileLoadException fileLoad => $"程序集加载失败：{fileLoad.Message}",
         BadImageFormatException => "程序集格式无效（可能不是 .NET 程序集，或目标框架/位数不匹配）。",
         TypeLoadException typeLoad => $"类型加载失败：{typeLoad.Message}",
         _ => ex.Message,
     };
+
+    /// <summary>
+    /// 「缺少依赖程序集」有两种成因，必须分开报：插件自己的依赖没复制到插件目录（按 PLUGIN.md §6 补文件即可），
+    /// 或者插件构建用的 .NET / Windows SDK 比宿主新 —— 引用了宿主没有的更高版本框架程序集
+    /// （Microsoft.Windows.SDK.NET、WinRT.Runtime 这类投影）。.NET 不允许向下绑定强命名程序集，
+    /// 只说一句「缺少 xxx」会把人引去查依赖复制，所以这里直接比对宿主目录里那份的版本并把话说清。
+    /// </summary>
+    private static string DescribeMissingAssembly(FileNotFoundException ex)
+    {
+        var requested = TryParseAssemblyName(ex.FileName);
+        if (requested?.Name is not { } name || requested.Version is not { } wanted)
+        {
+            return $"缺少依赖程序集：{ex.FileName ?? ex.Message}";
+        }
+
+        // 宿主目录里没有同名文件 → 真的是插件自己漏带了依赖；宿主那份版本不低于要求 → 不是版本错配
+        var hostPath = Path.Combine(AppContext.BaseDirectory, name + ".dll");
+        if (!File.Exists(hostPath)) return $"缺少依赖程序集：{ex.FileName}";
+
+        if (TryGetAssemblyVersion(hostPath) is not { } provided || provided >= wanted)
+        {
+            return $"缺少依赖程序集：{ex.FileName}";
+        }
+
+        return $"插件需要 {name} {wanted}，宿主提供的是 {provided}：" +
+               "插件构建用的 .NET / Windows SDK 比宿主新，请用与宿主相同或更旧的 SDK 重新构建插件（见 PLUGIN.md §6）。";
+    }
+
+    private static AssemblyName? TryParseAssemblyName(string? displayName)
+    {
+        if (string.IsNullOrEmpty(displayName)) return null;
+
+        try
+        {
+            var name = new AssemblyName(displayName);
+            return string.IsNullOrEmpty(name.Name) ? null : name;
+        }
+        catch (Exception)
+        {
+            // 不是程序集显示名（例如普通文件路径），交给通用文案
+            return null;
+        }
+    }
+
+    /// <summary>只读程序集元数据取版本，不会把它加载进任何 ALC。</summary>
+    private static Version? TryGetAssemblyVersion(string path)
+    {
+        try
+        {
+            return AssemblyName.GetAssemblyName(path).Version;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
 
     private static UIElement BuildErrorView(string message, Exception exception)
     {

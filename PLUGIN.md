@@ -213,6 +213,43 @@ void OnMorphTick()
 
 本机（native）依赖也放在插件目录里，`LoadUnmanagedDll` 会一并在该目录解析。
 
+### 6.1 构建用的 SDK 不能比宿主新
+
+`Microsoft.Windows.SDK.NET`、`WinRT.Runtime` 这类 .NET 投影程序集**由宿主提供**（插件包里不带、也别带，见上面规则 1），
+而 .NET **不允许向下绑定强命名程序集**。插件若用比宿主新的 .NET SDK 构建，引用的投影版本就会高于宿主，加载时报：
+
+```
+插件需要 Microsoft.Windows.SDK.NET 10.0.26100.86，宿主提供的是 10.0.26100.38：
+插件构建用的 .NET / Windows SDK 比宿主新，请用与宿主相同或更旧的 SDK 重新构建插件
+```
+
+（发生在静态构造里时还会被包成 `TypeInitializationException`。）正式版宿主由 CI 用 `.NET 10.0.x` 构建，
+所以插件也必须钉在 .NET 10 —— 在插件仓库根目录放一个 `global.json`：
+
+```json
+{
+  "sdk": {
+    "version": "10.0.200",
+    "rollForward": "latestFeature",
+    "allowPrerelease": false
+  }
+}
+```
+
+不钉的话 `dotnet build` 会挑机器上最高的 SDK（装了 .NET 11 预览版就会挑它），于是出现"本地能跑、装到正式版宿主上就报错"：
+本地宿主和插件是同一个新 SDK 构建的，正式版宿主不是。
+
+实在没法换 SDK 时，可以只钉投影版本：
+
+```xml
+<PropertyGroup>
+  <WindowsSdkPackageVersion>10.0.26100.57</WindowsSdkPackageVersion>
+</PropertyGroup>
+```
+
+值取宿主发布版 `WinIsland.deps.json` 里 `runtimepack.Microsoft.Windows.SDK.NET.Ref/` 后面的版本号（宿主换 SDK 就得跟着改），
+所以能加 `global.json` 就别走这条路。
+
 ---
 
 ## 7. 开发循环
@@ -311,6 +348,7 @@ pwsh tools/pack-plugin.ps1 -ProjectDir samples\HelloPlugin
 |-----------|------|
 | 程序集里没有找到 IIslandPlugin 实现 | 入口类不是 `public sealed`、抽象、或缺无参构造 |
 | 缺少依赖程序集：xxx | 依赖没复制到插件目录（见 §6）或 deps.json 缺失 |
+| 插件需要 X a.b.c，宿主提供的是 X d.e.f | 插件构建用的 .NET / Windows SDK 比宿主新（§6.1），加 `global.json` 钉住 SDK 后重新构建 |
 | 插件针对 WinIsland.Core x.y 构建，与宿主不兼容 | SDK 大版本不一致，用 SDK 2.x 重新编译 |
 | 已忽略调用 xxx：插件当前状态为 已停用 | 停用后仍有回调（定时器/网络回调），属正常保护 |
 | 形态动画执行失败 | 插件动画抛异常（多为 §8 的 Storyboard 问题），宿主已忽略并记日志 |
