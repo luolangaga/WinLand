@@ -45,6 +45,12 @@ public sealed class MarketplaceService
     /// <summary>单个源的尝试超时：被墙的地址有时会挂着不返回，不能让它拖住整个刷新。</summary>
     private static readonly TimeSpan IndexTimeout = TimeSpan.FromSeconds(10);
 
+    /// <summary>
+    /// 竞速窗口：清单源并行请求，最快的那个回来后最多再等这么久，用于和其它源比较新旧。
+    /// 被墙的源会一直挂着不返回，不能让它们把刷新拖到超时。
+    /// </summary>
+    private static readonly TimeSpan CandidatesGrace = TimeSpan.FromSeconds(3);
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -102,8 +108,11 @@ public sealed class MarketplaceService
     /// <summary>最近一次清单的获取时间（缓存命中时是缓存写入时间）。</summary>
     public DateTimeOffset? LastIndexTime { get; private set; }
 
-    /// <summary>最近一次清单是否来自本地缓存。</summary>
+    /// <summary>最近一次清单是否来自本地缓存（没有任何源能确认它）。</summary>
     public bool LastIndexFromCache { get; private set; }
+
+    /// <summary>回退到缓存时的完整说明（含每个源的失败原因），供界面直接显示。</summary>
+    public string? LastIndexNote { get; private set; }
 
     /// <summary>给界面看的来源名称（官方源 / 国内镜像 / CDN）。</summary>
     public string ActiveSourceLabel => DescribeSource(ActiveBaseUrl);
@@ -130,6 +139,7 @@ public sealed class MarketplaceService
         await _gate.WaitAsync(ct);
         try
         {
+            LastIndexNote = null;
             var candidates = BuildCandidates();
             var cached = TryReadCache(out var cachedAt, out var cachedBase);
 
@@ -141,64 +151,163 @@ public sealed class MarketplaceService
                 return cached;
             }
 
-            Exception? lastError = null;
-            foreach (var candidate in candidates)
+            var attempts = await FetchIndexAttemptsAsync(candidates, cached != null, cachedBase, ct);
+            var failures = attempts.Where(a => a.Error != null).ToList();
+            foreach (var failure in failures)
             {
-                ct.ThrowIfCancellationRequested();
-                try
-                {
-                    // 只有同一个源才谈得上 ETag / 304
-                    var etag = string.Equals(candidate, cachedBase, StringComparison.OrdinalIgnoreCase) ? ReadEtag() : null;
-                    var fetch = await FetchIndexTextAsync(candidate, cached != null ? etag : null, ct);
+                _log.Warn($"市场源 {failure.BaseUrl} 不可用：{failure.Error!.Message}");
+            }
 
-                    if (fetch.Text == null && cached != null)
-                    {
-                        // 304：内容没变，只刷新时间戳
-                        ActiveBaseUrl = candidate;
-                        WriteCache(candidate, null, fetch.ETag);
-                        LastIndexTime = cachedAt;
-                        LastIndexFromCache = true;
-                        return cached;
-                    }
+            // 服务端 304：缓存内容就是服务端的最新内容，只是时间戳需要刷新
+            if (cached != null
+                && attempts.FirstOrDefault(a => a.Error == null && a.Fetch != null && a.Fetch.Text == null) is { } verified)
+            {
+                ActiveBaseUrl = verified.BaseUrl;
+                WriteCache(verified.BaseUrl, null, verified.Fetch!.ETag);
+                LastIndexTime = DateTimeOffset.UtcNow;
+                LastIndexFromCache = false;
+                _log.Info($"插件市场清单无变化（来源 {verified.BaseUrl}）");
+                return cached;
+            }
 
-                    var index = ParseIndex(fetch.Text!);
-                    ActiveBaseUrl = candidate;
-                    WriteCache(candidate, fetch.Text, fetch.ETag);
-                    LastIndexTime = DateTimeOffset.UtcNow;
-                    LastIndexFromCache = false;
-                    _log.Info($"插件市场清单已更新：{index.Plugins.Count} 个插件（来源 {candidate}）");
-                    return index;
-                }
-                catch (OperationCanceledException)
+            var best = PickFreshest(attempts);
+
+            if (best != null)
+            {
+                if (cached != null && best.Index!.Updated < cached.Updated)
                 {
-                    throw;
+                    // 镜像同步落后：旧清单不能覆盖更新的本地缓存
+                    ActiveBaseUrl = best.BaseUrl;
+                    LastIndexTime = cachedAt;
+                    LastIndexFromCache = true;
+                    LastIndexNote = $"所有可用源的清单都比本地缓存旧（最新可用的是 {DescribeSource(best.BaseUrl)} 的 {best.Index.Updated.ToLocalTime():MM-dd HH:mm}），显示的是 {cachedAt.ToLocalTime():MM-dd HH:mm} 的缓存清单。";
+                    _log.Warn(LastIndexNote);
+                    return cached;
                 }
-                catch (Exception ex)
-                {
-                    lastError = ex;
-                    if (candidates.Count > 1)
-                    {
-                        _log.Warn($"市场源 {candidate} 不可用，尝试下一个：{ex.Message}");
-                    }
-                }
+
+                ActiveBaseUrl = best.BaseUrl;
+                WriteCache(best.BaseUrl, best.Fetch!.Text, best.Fetch.ETag);
+                LastIndexTime = DateTimeOffset.UtcNow;
+                LastIndexFromCache = false;
+                _log.Info($"插件市场清单已更新：{best.Index!.Plugins.Count} 个插件（来源 {best.BaseUrl}）");
+                return best.Index!;
             }
 
             if (cached != null)
             {
-                _log.Warn($"所有市场源都不可用，已回退到本地缓存：{lastError?.Message}");
                 ActiveBaseUrl = cachedBase ?? candidates[0];
                 LastIndexTime = cachedAt;
                 LastIndexFromCache = true;
+                LastIndexNote = $"无法连接市场源（{DescribeFailures(failures)}），显示的是 {cachedAt.ToLocalTime():MM-dd HH:mm} 的缓存清单。";
+                _log.Warn($"所有市场源都不可用，已回退到本地缓存：{DescribeFailures(failures)}");
                 return cached;
             }
 
-            throw new MarketplaceException($"无法连接插件市场：{lastError?.Message ?? "未知错误"}", lastError);
+            throw new MarketplaceException($"无法连接插件市场：{DescribeFailures(failures)}", failures.FirstOrDefault()?.Error);
         }
         finally
         {
             _gate.Release();
         }
     }
+
+    /// <summary>
+    /// 并行请求所有清单源：最快的那个回来后最多再等 <see cref="CandidatesGrace"/> 比较新旧，
+    /// 这样"被墙的源挂着不返回"不再拖住刷新，也不会因为排序上第一个源失败就放弃镜像。
+    /// </summary>
+    private async Task<List<IndexAttempt>> FetchIndexAttemptsAsync(
+        List<string> candidates, bool freshEtag, string? cachedBase, CancellationToken ct)
+    {
+        using var race = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var tasks = candidates.Select(candidate => RunAsync(candidate)).ToList();
+
+        async Task<IndexAttempt> RunAsync(string candidate)
+        {
+            try
+            {
+                // 只有同一个源才谈得上 ETag / 304
+                var etag = freshEtag && string.Equals(candidate, cachedBase, StringComparison.OrdinalIgnoreCase) ? ReadEtag() : null;
+                var fetch = await FetchIndexTextAsync(candidate, etag, race.Token);
+                return new IndexAttempt(candidate, fetch.Text == null ? null : ParseIndex(fetch.Text), fetch, null);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // 这是本源的超时或竞速取消，不是用户取消：记为该源失败，继续用其它源
+                return new IndexAttempt(candidate, null, null, new MarketplaceException(
+                    race.IsCancellationRequested
+                        ? $"未在 {CandidatesGrace.TotalSeconds:0} 秒竞速窗口内返回，已跳过"
+                        : $"超过 {IndexTimeout.TotalSeconds:0} 秒无响应"));
+            }
+            catch (Exception ex)
+            {
+                return new IndexAttempt(candidate, null, null, ex);
+            }
+        }
+
+        var all = Task.WhenAll(tasks);
+        if (tasks.Count > 1)
+        {
+            var deadline = DateTimeOffset.UtcNow + IndexTimeout;
+            var first = await Task.WhenAny(tasks);
+
+            // 权威源（GitHub 官方源，Action 在那边生成清单）成功就不用比了
+            if (!(first.IsCompletedSuccessfully
+                  && first.Result.Error == null
+                  && string.Equals(first.Result.BaseUrl, DefaultMirrors[0], StringComparison.OrdinalIgnoreCase)))
+            {
+                // 给其它源一点时间追上（好比较新旧），但整体不超过单个源的超时时间
+                var remaining = deadline - DateTimeOffset.UtcNow;
+                var grace = remaining < CandidatesGrace ? remaining : CandidatesGrace;
+                if (grace > TimeSpan.Zero)
+                {
+                    await Task.WhenAny(all, Task.Delay(grace, ct));
+                }
+            }
+        }
+
+        race.Cancel();
+        return (await all).ToList();
+    }
+
+    /// <summary>取"最新"的清单：先比清单里的 updated，同样新时按镜像优先级（官方源优先）。</summary>
+    private static IndexAttempt? PickFreshest(List<IndexAttempt> attempts)
+    {
+        IndexAttempt? best = null;
+        foreach (var attempt in attempts)
+        {
+            if (attempt.Index == null)
+            {
+                continue;
+            }
+
+            if (best == null
+                || attempt.Index.Updated > best.Index!.Updated
+                || (attempt.Index.Updated == best.Index!.Updated && Priority(attempt.BaseUrl) < Priority(best.BaseUrl)))
+            {
+                best = attempt;
+            }
+        }
+
+        return best;
+    }
+
+    private static int Priority(string baseUrl)
+    {
+        for (var i = 0; i < DefaultMirrors.Count; i++)
+        {
+            if (string.Equals(DefaultMirrors[i], baseUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return int.MaxValue;
+    }
+
+    private static string DescribeFailures(List<IndexAttempt> failures)
+        => failures.Count == 0
+            ? "没有可用的市场源"
+            : string.Join("；", failures.Select(f => $"{DescribeSource(f.BaseUrl)} {f.Error!.Message}"));
 
     /// <summary>按需拉取某个插件的 README（列表阶段不做任何逐插件请求）。</summary>
     public async Task<string?> GetReadmeAsync(MarketplacePlugin plugin, CancellationToken ct)
@@ -279,7 +388,7 @@ public sealed class MarketplaceService
                     _log.Info($"已下载插件包 {plugin.Id} {plugin.Version}（{plugin.DescribeSize()}，来源 {source}）");
                     return target;
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     throw;
                 }
@@ -320,7 +429,7 @@ public sealed class MarketplaceService
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(IndexTimeout);
-        using var response = await _http.SendAsync(request, timeout.Token);
+        using var response = await SendAsync(request, timeout.Token, ct);
 
         if (response.StatusCode == HttpStatusCode.NotModified)
         {
@@ -333,6 +442,23 @@ public sealed class MarketplaceService
         }
 
         return new IndexFetch(await response.Content.ReadAsStringAsync(timeout.Token), response.Headers.ETag?.Tag ?? etag);
+    }
+
+    /// <summary>
+    /// 把"本次请求自己的超时"翻译成普通失败，而不是 OperationCanceledException：
+    /// 一个挂住的地址若被当成取消抛出去，整轮尝试都会中断，镜像和缓存回退都不会发生。
+    /// 用户主动取消（<paramref name="ct"/>）仍然照常抛出。
+    /// </summary>
+    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token, CancellationToken ct)
+    {
+        try
+        {
+            return await _http.SendAsync(request, token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new MarketplaceException($"超过 {IndexTimeout.TotalSeconds:0} 秒无响应");
+        }
     }
 
     private async Task DownloadFileAsync(string baseUrl, MarketplacePlugin plugin, string target, IProgress<double>? progress, CancellationToken ct)
@@ -391,7 +517,7 @@ public sealed class MarketplaceService
 
                 return await response.Content.ReadAsStringAsync(timeout.Token);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 throw;
             }
@@ -580,10 +706,13 @@ public sealed class MarketplaceService
             if (json != null)
             {
                 File.WriteAllText(CachePath, json);
+
+                // 换源时 ETag 必须跟着换：旧源的 ETag 发给新源只会得到错误的 304
+                File.WriteAllText(EtagPath, etag ?? "");
             }
 
             File.WriteAllText(MetaPath, JsonSerializer.Serialize(new CacheMeta(baseUrl, DateTimeOffset.UtcNow), JsonOptions));
-            if (etag != null)
+            if (json == null && etag != null)
             {
                 File.WriteAllText(EtagPath, etag);
             }
@@ -627,4 +756,7 @@ public sealed class MarketplaceService
 
     /// <summary>清单抓取结果：<c>Text</c> 为 null 表示 304（内容未变）。</summary>
     private sealed record IndexFetch(string? Text, string? ETag);
+
+    /// <summary>单个源的抓取结果：<c>Error</c> 非 null 表示该源不可用。</summary>
+    private sealed record IndexAttempt(string BaseUrl, MarketplaceIndex? Index, IndexFetch? Fetch, Exception? Error);
 }

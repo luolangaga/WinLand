@@ -207,27 +207,5 @@
                     ValueChanged="HorizontalOffsetSlider_ValueChanged" />
             </Grid>
         </Border>
-
-        <Border Style="{StaticResource SettingsCardStyle}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Spacing="2" VerticalAlignment="Center">
-                    <TextBlock Text="任务栏嵌入（实验性）" />
-                    <TextBlock
-                        x:Name="HookStatusText"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="" />
-                </StackPanel>
-                <ToggleSwitch
-                    x:Name="HookToggle"
-                    Grid.Column="1"
-                    Margin="0,0,-110,0"
-                    Toggled="HookToggle_Toggled" />
-            </Grid>
-        </Border>
     </StackPanel>
 </UserControl>

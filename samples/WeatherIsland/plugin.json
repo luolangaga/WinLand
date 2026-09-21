@@ -1,0 +1,14 @@
+{
+  "id": "weather-island",
+  "name": "天气小岛",
+  "version": "1.0.0",
+  "entry_dll": "WeatherIsland.dll",
+  "api_version": 2,
+  "min_host_version": "2.0.0",
+  "description": "小岛显示当前温度，展开看今天/明天/后天三天预报。数据来自 Open-Meteo，不用注册也不用填密钥。",
+  "author": "luolan",
+  "icon_glyph": "\uE9CA",
+  "homepage": "https://github.com/luolangaga/weather-island",
+  "license": "MIT",
+  "tags": ["weather", "life"]
+}

@@ -39,10 +39,6 @@ public sealed partial class GeneralSettingsPage : UserControl
         };
         LoadOffsetControl();
         HorizontalOffsetSlider.Value = _settings.Get(HorizontalOffsetKey, 0.0);
-        HookToggle.IsOn = _settings.Get(TaskbarHookHost.EnabledKey, false);
-        RefreshHookStatus();
-        _settings.Changed += OnSettingChanged;
-        Unloaded += (_, _) => _settings.Changed -= OnSettingChanged;
         _loading = false;
     }
 
@@ -115,36 +111,5 @@ public sealed partial class GeneralSettingsPage : UserControl
     {
         if (_loading) return;
         _settings.Set(HorizontalOffsetKey, HorizontalOffsetSlider.Value);
-    }
-
-    private void HookToggle_Toggled(object sender, RoutedEventArgs e)
-    {
-        if (_loading) return;
-        // 重新开启时清掉「上次失败/不支持」标记，给 hook 一次重试机会
-        if (HookToggle.IsOn)
-        {
-            _settings.Set(TaskbarHookHost.FailedKey, false);
-            _settings.Set(TaskbarHookHost.UnsupportedKey, "");
-        }
-        _settings.Set(TaskbarHookHost.EnabledKey, HookToggle.IsOn);
-        RefreshHookStatus();
-    }
-
-    private void OnSettingChanged(string key)
-    {
-        if (key == TaskbarHookHost.StatusKey) DispatcherQueue.TryEnqueue(RefreshHookStatus);
-    }
-
-    /// <summary>状态文本由 hook 宿主写进 island.taskbarHook.status，这里只负责展示。</summary>
-    private void RefreshHookStatus()
-    {
-        string status = _settings.Get(TaskbarHookHost.StatusKey, "");
-        if (string.IsNullOrWhiteSpace(status))
-        {
-            status = _settings.Get(TaskbarHookHost.EnabledKey, false)
-                ? "等待注入…"
-                : "未开启：岛作为浮层贴在任务栏条带上（不改动 explorer）。";
-        }
-        HookStatusText.Text = status;
     }
 }

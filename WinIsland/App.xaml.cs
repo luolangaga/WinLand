@@ -20,8 +20,6 @@ public partial class App : Application
     private readonly PluginLogService _logs;
     private TrayIcon? _tray;
     internal SettingsWindow? _settingsWindow;
-    private TaskbarHookHost _taskbarHook = null!;
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer _hookWatchdog = null!;
     private bool _exiting;
 
     public App()
@@ -59,25 +57,6 @@ public partial class App : Application
 
             _plugins = new PluginHost(_service, _settings, _island.DispatcherQueue, _logs);
             _marketplace = new MarketplaceService(_settings, _logs.Host);
-
-            // 任务栏嵌入 hook（实验性）：注入/探活/失败自动回滚，没开或没有 DLL 时什么也不做
-            _taskbarHook = new TaskbarHookHost(_settings, _logs.Host, _island.DispatcherQueue);
-            _hookWatchdog = _island.DispatcherQueue.CreateTimer();
-            _hookWatchdog.Interval = TimeSpan.FromSeconds(1);
-            _hookWatchdog.IsRepeating = true;
-            _hookWatchdog.Tick += (_, _) =>
-            {
-                try
-                {
-                    _taskbarHook.Tick();
-                }
-                catch (Exception ex)
-                {
-                    // WinUI 定时器回调里抛异常 = stowed exception = 进程直接死，必须兜住
-                    _logs.Host.Error("任务栏 hook 看门狗回调异常（已忽略）", ex);
-                }
-            };
-            _hookWatchdog.Start();
 
             _island.ShowIsland();
 
@@ -179,8 +158,6 @@ public partial class App : Application
         try
         {
             _tray?.Dispose();
-            _hookWatchdog?.Stop();
-            _taskbarHook?.Dispose();   // 请求 hook 移除已插入元素并自行 detach
             await _plugins.ShutdownAllAsync();
             _plugins.Dispose();
         }

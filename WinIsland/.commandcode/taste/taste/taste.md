@@ -7,7 +7,8 @@
 - Values being able to point a network-backed feature at a local directory/offline source for development and testing. Confidence: 0.55
 - Cares about network efficiency: fetch one manifest/listing file per refresh (packing list, metadata and icons into it) rather than issuing per-item requests; and skip a re-fetch when a cached copy is fresh. Confidence: 0.7
 - Gives a high-level spec and explicit authority over the rest ("剩下的你觉得咋样好就咋样来") — once the hard requirements are met, decide open design details autonomously and summarize the choice instead of asking. Confidence: 0.6
-- Wants work verified end to end against the real deployed artifacts/URLs, not just compiled locally. Confidence: 0.5
+- Wants work verified end to end against the real deployed artifacts/URLs, not just compiled locally. Confidence: 0.6
+- Expects the test step to deploy into the app the user actually has installed (auto-discover the install directory instead of asking the user to type a path), and demands the user personally confirm the result before anything is published/uploaded — the agent must not self-certify a fix as tested. Confidence: 0.7
 - Expects plugin/detail descriptions (README-style content) to be rendered as rich Markdown — headings, lists, tables, fenced code blocks, quotes, inline styles and links — not shown as raw text. Confidence: 0.6
 - Expects the first view of network-backed content to be correct without a manual refresh: cached data must be scoped to the source/configuration it came from, so stale or foreign-source cache entries get discarded instead of displayed. Confidence: 0.6
 - Expects test/dev runs to stay isolated from the user's real app state (separate temp cache/settings directories) — dislikes discovering test fixtures in the live data. Confidence: 0.6
@@ -15,3 +16,7 @@
 - Expects text/content in dialogs and cards to stay inside its container: long values (hashes, URLs, timestamps, long names, tag lists) must wrap or reflow rather than overflow or be clipped — including in popups whose width is bounded by the framework. Confidence: 0.65
 - Runs a 200%-scaled display (RasterizationScale = 2): hardcoded pixel widths look fine at 1x but visibly overflow for them, so layout bugs must be vetted at high DPI. Confidence: 0.6
 - Prefers not to add third-party UI packages (e.g., Community Toolkit) to fill small layout gaps — write the minimal helper in-repo instead. Confidence: 0.55
+- Wants README/onboarding docs to be example-first: lead with copy-pasteable prompts/commands the user can send to an AI immediately (install the skill, then a sample request), keeping prose explanation secondary. Confidence: 0.7
+- Writes docs/tooling for non-programmers: the flow should be "have the AI install it, then just talk to the AI", with literal example phrasings the user can reuse. Confidence: 0.6
+- Expects a tool/workflow to start with an explicit environment check (SDK, git, CLI, required source repo, correct paths), reporting each item as OK/missing with a concrete install command. Confidence: 0.65
+- Wants the agent to not stop at reporting missing prerequisites — it should proactively offer and install them (e.g., run `winget install` for .NET, then re-verify), asking consent first. Confidence: 0.65

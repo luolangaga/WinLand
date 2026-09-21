@@ -44,9 +44,6 @@ WinIsland/                    — Main application
     TrayIcon.cs              — Native Shell_NotifyIcon tray icon with Win32 popup menu
     Win32.cs                 — All P/Invoke: window styles, DWM, subclassing for border removal, taskbar strip detection (`GetTaskbarStrip`), topmost-band self-heal (`EnsureTopmost`)
     TaskbarLayout.cs         — UI-Automation probe of the taskbar's *occupied* bands (so the island can be placed in a real free one); background-thread only, degrades to empty
-    TaskbarHookHost.cs       — host side of the optional explorer hook: remote injection, heartbeat/watchdog, fail-closed rollback to the overlay
-WinIsland.TaskbarHook/       — native hook DLL (MSVC, static CRT) injected into explorer for *real* taskbar embedding; stage 1 = handshake + read-only probe only, never touches the taskbar tree
-    hook.cpp                 — worker thread: open host events → probe XAML diagnostics → heartbeat → unload on Shutdown/host death
     Plugins/                 — Plugin engine v2
       PluginHost.cs          — facade: discover/install/enable/disable/reload/uninstall, per-plugin serialization
       PluginInstance.cs      — state machine + timeouts + guarded callbacks + ALC unload & GC verification

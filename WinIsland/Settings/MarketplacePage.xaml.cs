@@ -82,7 +82,7 @@ public sealed partial class MarketplacePage : UserControl
 
             if (_market.LastIndexFromCache && force)
             {
-                ShowStatus("已使用本地缓存", $"无法连接市场源，显示的是 {DescribeTime(_market.LastIndexTime)} 的缓存清单。", InfoBarSeverity.Warning);
+                ShowStatus("已使用本地缓存", _market.LastIndexNote ?? $"无法连接市场源，显示的是 {DescribeTime(_market.LastIndexTime)} 的缓存清单。", InfoBarSeverity.Warning);
             }
             else if (_market.IsMirrorActive)
             {

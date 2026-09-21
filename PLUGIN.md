@@ -147,6 +147,33 @@ Context.Island.SetContent(new IslandLiveContent
 宿主会把卡片拉伸到这个统一尺寸。视图请用自适应布局（`Grid` 的 `*` 行列、`HorizontalAlignment/VerticalAlignment=Stretch`），
 不要假设自己一定能拿到 `ExpandedSize` 声明的精确尺寸。
 
+**形态动画不要用 `Storyboard`，必须逐帧直接赋值**（适用于所有插件视图，包括纯代码自绘的可视树）：
+
+```csharp
+// 对：DispatcherQueueTimer 每帧直接给属性赋值
+_morphTimer = DispatcherQueue.CreateTimer();
+_morphTimer.Interval = TimeSpan.FromMilliseconds(16);
+_morphTimer.IsRepeating = true;
+_morphTimer.Tick += (_, _) => OnMorphTick();
+
+void OnMorphTick()
+{
+    var t = Math.Clamp((DateTimeOffset.UtcNow - _start).TotalMilliseconds / _duration.TotalMilliseconds, 0, 1);
+    _detail.Height = Math.Max(0, ExpandedDetailHeight * Ease(t));   // Height 会被缓动曲线推成负数，要夹住
+    _icon.Width = _icon.Height = CompactIcon + (ExpandedIcon - CompactIcon) * Ease(t);
+}
+```
+
+原因是**属性路径**动画（`Storyboard.SetTargetProperty(anim, "Height")`）在动态加载的插件程序集里解析不出类型信息，
+会在动画 tick 上抛 `COMException (0x800F1001): Invalid attribute value Unknown for property Height`。
+这个异常发生在 tick 里，**调用点的 `try/catch` 拦不住**，会冒到宿主的未处理异常处理器：岛体尺寸已经收回去了、
+插件的 `Height` 却卡在中间值，整块内容错位并且不再响应 hover（表现为"大岛变小之后卡死"）。
+宿主内置视图（Media/Battery）能安全使用 `Storyboard`，是因为它们在宿主程序集里，类型元数据可解析——插件侧不具备这个条件。
+
+`IMorphView` 的调用点也要注意：视图可能被宿主放进展开队列的卡片里（`QueuePanel`），
+契约要求 `AnimateToExpanded/AnimateToCompact` 能在任意时刻、任意父级下被调用；
+动画进度要在视图里自己累计（如 `_progress`），这样"展开到一半又收起"才能从当前位置接着走，而不是跳回起点。
+
 需要「临时不占岛」时，推荐像 `samples/HardwareMonitor` 那样加一个 `enabled` 设置：
 关掉时 `SetContent(null)`，打开时重新 `SetContent(content)`，插件本身继续运行。
 
@@ -219,9 +246,7 @@ public sealed partial class MyView : UserControl, IMorphView
 * 图片等资源用 `Context.PluginDirectory` 拼绝对路径加载，不要用 `ms-appx:`。
 * **视图根元素保持透明背景**：岛体材质由宿主绘制（Apple 风格是纯黑胶囊，Windows Fluent 风格是 Desktop Acrylic / Mica
   系统材质），插件自绘不透明底色会在切换风格时露出与材质不一致的色块。卡片、徽标用半透明白（如 `#33FFFFFF`）即可适配两种材质。
-* **不要用 `Storyboard` 做形态动画**：属性路径动画在动态加载的 XBF 树上会报
-  `Invalid attribute value Unknown for property Height`（E_XAMLPARSEFAILED，会打断宿主的状态机）。
-  用逐帧属性赋值（`samples/XamlPlugin` 的 `AnimateToExpanded/Compact` 就是模板）。
+* 形态动画同样要遵守上面的「逐帧直接赋值」规则——这条与是否使用 XAML 无关，XBF 树只是更容易触发的场景。
 
 ---
 
