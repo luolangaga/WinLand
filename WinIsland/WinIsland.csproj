@@ -49,4 +49,9 @@
     <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
     <PublishTrimmed>False</PublishTrimmed>
   </PropertyGroup>
+
+  <!-- dotnet publish 不会把 XAML 资源索引 WinIsland.pri 带进发布目录，缺了它程序起不来，这里补上 -->
+  <Target Name="CopyPriToPublishDir" AfterTargets="Publish" Condition="Exists('$(TargetDir)$(TargetName).pri')">
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pri" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

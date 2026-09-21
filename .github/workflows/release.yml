@@ -76,6 +76,15 @@ jobs:
           --self-contained true
           -o publish/${{ matrix.arch }}
 
+      # WinIsland.pri 是 WinUI3 的 XAML 资源索引，缺了它程序进程活着但窗口永远不会显示
+      - name: 校验发布产物
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "publish/${{ matrix.arch }}/WinIsland.pri")) {
+            throw "发布目录缺少 WinIsland.pri，打出来的包起不来"
+          }
+          Write-Host "产物文件数: $((Get-ChildItem 'publish/${{ matrix.arch }}' -Recurse -File).Count)"
+
       - name: 安装 Inno Setup ${{ env.INNO_SETUP_VERSION }}
         shell: pwsh
         run: |
