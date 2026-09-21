@@ -4,3 +4,7 @@ obj/
 *.suo
 *.cache
 .vs/
+
+# 发布 / 安装包产物
+publish/
+installer/Output/

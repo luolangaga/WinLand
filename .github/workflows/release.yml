@@ -1,0 +1,134 @@
+name: 构建安装包
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 版本号（仅手动触发时使用，例如 1.2.3）
+        required: false
+        default: "0.0.0-dev"
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  INNO_SETUP_VERSION: "6.7.2"
+  PROJECT: WinIsland/WinIsland.csproj
+
+jobs:
+  prepare:
+    name: 解析版本号
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: 解析版本号
+        id: resolve
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${{ inputs.version }}"
+          fi
+          [ -n "$version" ] || version="0.0.0-dev"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "版本号: $version"
+
+  build:
+    name: 构建 ${{ matrix.arch }} 安装包
+    needs: prepare
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            rid: win-x64
+            platform: x64
+          - arch: arm64
+            rid: win-arm64
+            platform: ARM64
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # 自包含发布：.NET 运行时和 Windows App SDK 都在目录里，用户不需要另装运行时
+      - name: 发布自包含程序 (${{ matrix.rid }})
+        env:
+          WINISLAND_VERSION: ${{ needs.prepare.outputs.version }}
+        run: >
+          dotnet publish ${{ env.PROJECT }}
+          -c Release
+          -r ${{ matrix.rid }}
+          -p:Platform=${{ matrix.platform }}
+          -p:DebugType=none
+          -p:DebugSymbols=false
+          --self-contained true
+          -o publish/${{ matrix.arch }}
+
+      - name: 安装 Inno Setup ${{ env.INNO_SETUP_VERSION }}
+        shell: pwsh
+        run: |
+          $version = "${{ env.INNO_SETUP_VERSION }}"
+          $tag = "is-" + ($version -replace '\.', '_')
+          $url = "https://github.com/jrsoftware/issrc/releases/download/$tag/innosetup-$version.exe"
+          $exe = Join-Path $env:RUNNER_TEMP "innosetup-$version.exe"
+          Invoke-WebRequest -Uri $url -OutFile $exe
+          $p = Start-Process -FilePath $exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Inno Setup 安装失败，退出码 $($p.ExitCode)" }
+
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "没有找到 ISCC.exe" }
+          Write-Host "使用编译器: $iscc"
+          "ISCC=$iscc" >> $env:GITHUB_ENV
+
+      - name: 编译 ${{ matrix.arch }} 安装包
+        shell: pwsh
+        run: |
+          # ISCC 会把警告写到 stderr，这里让它原样输出，成败看退出码
+          $ErrorActionPreference = 'Continue'
+          & $env:ISCC "/DAppVersion=${{ needs.prepare.outputs.version }}" "/DArch=${{ matrix.arch }}" "/DPublishDir=${{ github.workspace }}\publish\${{ matrix.arch }}" "installer\WinIsland.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC 编译失败，退出码 $LASTEXITCODE" }
+
+      - name: 上传安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinIsland-${{ matrix.arch }}-setup
+          path: installer/Output/*.exe
+          if-no-files-found: error
+
+  release:
+    name: 发布 Release
+    needs: [prepare, build]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载安装包
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 创建 GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ls -lh dist
+          gh release create "${GITHUB_REF_NAME}" dist/*.exe \
+            --title "WinIsland ${{ needs.prepare.outputs.version }}" \
+            --generate-notes \
+            --verify-tag

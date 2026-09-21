@@ -19,6 +19,9 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <EnableMsixTooling>false</EnableMsixTooling>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
+
+    <!-- 发版时由 CI 通过 WINISLAND_VERSION 环境变量注入版本号（本地构建保持默认） -->
+    <Version Condition="'$(WINISLAND_VERSION)' != ''">$(WINISLAND_VERSION)</Version>
   </PropertyGroup>
 
   <ItemGroup>
