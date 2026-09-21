@@ -47,10 +47,10 @@ public sealed partial class IslandWindow : Window
     private const double TrayReserve = 220;
     private const int PositionSlideMs = 300;
     /// <summary>
-    /// 任务栏跟随轮询周期。同时兼作置顶自愈的兜底检查 —— shell 会在你点任务栏时把 Shell_TrayWnd
+    /// 看门狗轮询周期：任务栏跟随 + 置顶自愈。shell 会在你点任务栏/开始菜单/搜索时把自己
     /// 抬到所有置顶窗口之上，岛整块被盖住，所以这个周期就是「被盖住到顶回来」的最坏延迟，取短一些。
     /// </summary>
-    private const int TaskbarPollMs = 120;
+    private const int WatchdogPollMs = 120;
     /// <summary>任务栏空闲段查询（UIA）的最小间隔：调用较慢，只在内容变化等时机补充刷新。</summary>
     private const int FreeBandsThrottleMs = 2000;
     /// <summary>
@@ -112,7 +112,8 @@ public sealed partial class IslandWindow : Window
     private bool _taskbarHidden;
     /// <summary>上次贴合的任务栏底边，用于识别条带移动/变高/换分辨率（只在真的变了才动窗口）。</summary>
     private int _lastStripBottom;
-    private DispatcherQueueTimer? _taskbarWatch;
+    /// <summary>看门狗：置顶自愈（两种位置模式）+ 任务栏跟随（仅底部模式）。</summary>
+    private DispatcherQueueTimer? _watchdog;
 
     // 任务栏空闲段（UIA 实测，物理像素，按左边界升序）：底部模式的水平落点用它避开 explorer 自己的内容。
     // 为空表示「没查到 / 不可用」→ 回退到按条带边缘对齐。
@@ -220,8 +221,8 @@ public sealed partial class IslandWindow : Window
         {
             StopPositionSlide();
             _positionSlide = null;
-            _taskbarWatch?.Stop();
-            _taskbarWatch = null;
+            _watchdog?.Stop();
+            _watchdog = null;
             _backdrop?.Dispose();
         };
 
@@ -894,22 +895,21 @@ public sealed partial class IslandWindow : Window
         // 已展开时按新方向重建队列（卡片顺序镜像：最先入队的活动仍离岛体最近）
         if (_expanded) BuildQueue();
 
+        // 看门狗与位置模式无关：顶部模式一样会被后来断言过置顶的窗口（shell 浮层、任务管理器、
+        // 各种悬浮窗/输入法候选框）压住，而顶部模式没有别的重升时机 —— 曾经只在底部模式启动它，
+        // 结果顶部模式被盖住后要等重启才恢复。任务栏跟随只是它在底部模式下额外做的事。
+        _watchdog ??= CreateWatchdog();
+        _watchdog.Start();
+        // 前台窗口一变（点任务栏/开始菜单/搜索）就立刻查一次置顶，不必等一个轮询周期
+        Win32.InstallForegroundWatcher(() => DispatcherQueue.TryEnqueue(() => HealTopmost()));
+
         if (bottom)
         {
             _taskbarHidden = false;
-            _taskbarWatch ??= CreateTaskbarWatch();
-            _taskbarWatch.Start();
             RefreshFreeBands(force: true);      // 进入底部模式立刻量一次任务栏空闲段
-            // 前台窗口一变（点任务栏/开始菜单/搜索）就立刻查一次置顶，不必等 250ms 轮询
-            Win32.InstallForegroundWatcher(() =>
-                DispatcherQueue.TryEnqueue(() =>
-                {
-                    if (_bottomAnchored) HealTopmost();
-                }));
         }
         else
         {
-            _taskbarWatch?.Stop();
             RefreshFreeBands();                 // 顶部模式不需要空闲段（清空，落点回到屏幕居中）
         }
     }
@@ -1276,22 +1276,23 @@ public sealed partial class IslandWindow : Window
         };
     }
 
-    private DispatcherQueueTimer CreateTaskbarWatch()
+    private DispatcherQueueTimer CreateWatchdog()
     {
         var timer = DispatcherQueue.CreateTimer();
-        timer.Interval = TimeSpan.FromMilliseconds(TaskbarPollMs);
+        timer.Interval = TimeSpan.FromMilliseconds(WatchdogPollMs);
         timer.IsRepeating = true;
-        timer.Tick += (_, _) => TaskbarWatchTick();
+        timer.Tick += (_, _) => WatchdogTick();
         return timer;
     }
 
     /// <summary>
-    /// 跟踪任务栏：自动隐藏/全屏时任务栏滑出屏幕，嵌进条带的岛必须一起收起 —— 否则它会压住
-    /// 屏幕底边的唤出热区，任务栏再也叫不出来；任务栏弹回来时岛跟着回来。
-    /// 条带移动/变高/换分辨率时重新贴合；Explorer 重启/全屏切换会把窗口踢出置顶带，顺手自愈。
+    /// 看门狗。先无条件做一次置顶自愈 —— 位置模式与置顶无关，顶部模式曾经没有任何重升时机，
+    /// 被盖住后只能重启恢复。任务栏跟随只在底部模式有意义，顶部模式到此为止。
     /// </summary>
-    private void TaskbarWatchTick()
+    private void WatchdogTick()
     {
+        HealTopmost();
+
         if (!_bottomAnchored) return;
 
         var outer = ToRect(DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).OuterBounds);
@@ -1325,18 +1326,17 @@ public sealed partial class IslandWindow : Window
             RefreshFreeBands(force: true);      // 条带位置/分辨率变了，空闲段坐标要重新量
             ApplyCanvasBounds();
         }
-        else
-        {
-            HealTopmost();
-        }
     }
 
     /// <summary>
     /// 置顶自愈：被任何可见的相交窗口压在下面时立刻重升，并把元凶记进日志（同原因 2 秒内只记一次）。
-    /// 触发点：250ms 轮询 + 前台窗口变化事件（任务栏/开始菜单/搜索抬层时不用等一个轮询周期）。
+    /// 触发点：看门狗轮询（所有位置模式）+ 前台窗口变化事件（任务栏/开始菜单/搜索抬层时不必等一个周期）。
+    /// 隐藏期间不做：窗口不在屏幕上，重升没有意义。
     /// </summary>
     private void HealTopmost()
     {
+        if (!_shown) return;
+
         if (Win32.EnsureTopmost(_hwnd, IslandScreenRect()) is not { } coverer) return;
 
         _topmostHealCount++;
