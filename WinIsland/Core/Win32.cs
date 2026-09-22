@@ -360,9 +360,11 @@ internal static partial class Win32
         return null;
     }
 
-    // ---- 前台窗口变化监听：任务栏/开始菜单/搜索抬层时立刻重升岛（轮询只是兜底）----
+    // ---- 前台窗口/焦点变化监听：任务栏/开始菜单/搜索抬层时立刻重升岛（轮询只是兜底），
+    //      同时也是触控展开「点了别处」的兜底信号 ----
 
     private const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+    private const uint EVENT_OBJECT_FOCUS = 0x8005;
     private const uint WINEVENT_OUTOFCONTEXT = 0x0000;
     private const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
 
@@ -399,12 +401,15 @@ internal static partial class Win32
 
     // 钩子委托必须存活（静态字段），否则会被 GC 回收导致回调丢失
     private static readonly WinEventProc _foregroundProc = OnForegroundEvent;
+    private static readonly WinEventProc _focusProc = OnFocusEvent;
     private static Action? _foregroundHandler;
 
     /// <summary>
-    /// 安装「前台窗口变化」监听。WINEVENT_OUTOFCONTEXT 要求安装线程自己跑消息泵，
-    /// 所以这里起一个后台线程专门 GetMessage。回调在钩子线程上执行，调用方负责切回 UI 线程。
-    /// 只安装一次。用途见 <see cref="EnsureTopmost"/>。
+    /// 安装「别的窗口被激活」监听：前台窗口变化（点任务栏/开始菜单/别的应用）与焦点变化。
+    /// 焦点那一路是触控的兜底信号 —— 触摸点在原生处理 WM_POINTER 的应用（浏览器、WinUI/UWP 应用、
+    /// 岛自己的设置窗）里不会产生鼠标消息，低级鼠标钩子看不到，但焦点一定会动。
+    /// WINEVENT_OUTOFCONTEXT 要求安装线程自己跑消息泵，所以这里起一个后台线程专门 GetMessage。
+    /// 回调在钩子线程上执行，调用方负责切回 UI 线程。只安装一次。用途见 <see cref="EnsureTopmost"/>。
     /// </summary>
     public static void InstallForegroundWatcher(Action onForegroundChanged)
     {
@@ -415,6 +420,9 @@ internal static partial class Win32
         {
             SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nint.Zero, _foregroundProc, 0, 0,
                 WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+            // 焦点监听不跳过自己的进程：点自己的设置窗同样算「点了别的地方」
+            SetWinEventHook(EVENT_OBJECT_FOCUS, EVENT_OBJECT_FOCUS, nint.Zero, _focusProc, 0, 0,
+                WINEVENT_OUTOFCONTEXT);
 
             while (GetMessage(out var msg, nint.Zero, 0, 0) > 0)
             {
@@ -439,6 +447,161 @@ internal static partial class Win32
         {
             // 钩子线程上绝不能抛异常
         }
+    }
+
+    private static void OnFocusEvent(nint hook, uint eventId, nint hwnd, int idObject, int idChild, uint threadId, uint time)
+    {
+        try
+        {
+            _foregroundHandler?.Invoke();
+        }
+        catch
+        {
+            // 钩子线程上绝不能抛异常
+        }
+    }
+
+    // ---- 全局按下监听：触控展开后「点岛外收起」的唯一信号源 ----
+    //
+    // 岛窗是 WS_EX_NOACTIVATE，又被窗口形状裁成岛体本身：岛外的一切点击/触摸都到不了这里。
+    // 而触摸没有悬停语义（手指抬起就是 PointerExited），展开后只能由「别处的下一次按下」来收。
+    // 低级鼠标钩子在安装它的线程上回调，所以要单独一个消息泵线程 —— 钩子回调要求线程处于
+    // 消息等待状态，而 UI 线程被插件卡住时不该连带拖住系统级输入。触摸在系统层会被提升成
+    // 鼠标按下，钩子同样收得到。只在触控展开期间安装，其余时间系统输入零开销。
+
+    private const int WH_MOUSE_LL = 14;
+    private const int WM_LBUTTONDOWN = 0x0201;
+    private const int WM_RBUTTONDOWN = 0x0204;
+    private const int WM_MBUTTONDOWN = 0x0207;
+    private const int WM_XBUTTONDOWN = 0x020B;
+    private const uint PM_NOREMOVE = 0x0000;
+    private const uint PM_REMOVE = 0x0001;
+    private const uint QS_ALLINPUT = 0x04FF;
+    /// <summary>监听线程回头确认「是否仍需要监听」的间隔；不监听时它就退出并卸掉钩子。</summary>
+    private const uint MouseWatchPollMs = 500;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSLLHOOKSTRUCT
+    {
+        public POINT pt;
+        public uint mouseData;
+        public uint flags;
+        public uint time;
+        public nint dwExtraInfo;
+    }
+
+    private delegate nint LowLevelMouseProc(int nCode, nint wParam, nint lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern nint SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, nint hMod, uint dwThreadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UnhookWindowsHookEx(nint hhk);
+
+    [DllImport("user32.dll")]
+    private static extern nint CallNextHookEx(nint hhk, int nCode, nint wParam, nint lParam);
+
+    [DllImport("user32.dll", EntryPoint = "PeekMessageW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PeekMessage(out MSG msg, nint hWnd, uint min, uint max, uint removeMsg);
+
+    [DllImport("user32.dll")]
+    private static extern uint MsgWaitForMultipleObjects(uint count, nint handles, [MarshalAs(UnmanagedType.Bool)] bool waitAll,
+        uint milliseconds, uint wakeMask);
+
+    // 钩子委托必须由静态字段持有，否则会被 GC 回收导致回调丢失
+    private static readonly LowLevelMouseProc _lowLevelMouseProc = OnLowLevelMouse;
+    private static readonly object _mouseWatcherGate = new();
+    private static Action<POINT>? _mouseDownHandler;
+    private static Thread? _mouseWatchThread;
+
+    /// <summary>
+    /// 开始派发全局按下（左/右/中/X 键）。<paramref name="onMouseDown"/> 在监听线程上被调用，
+    /// 只做记录或切线程，绝不要在里面碰 UI。重复调用只替换处理器。
+    /// </summary>
+    public static void InstallMouseDownWatcher(Action<POINT> onMouseDown)
+    {
+        lock (_mouseWatcherGate)
+        {
+            _mouseDownHandler = onMouseDown;
+            if (_mouseWatchThread != null) return;
+            StartMouseWatchThread();
+        }
+    }
+
+    /// <summary>停止派发全局按下：监听线程下一轮自行退出并卸掉钩子。</summary>
+    public static void UninstallMouseDownWatcher()
+    {
+        lock (_mouseWatcherGate)
+        {
+            _mouseDownHandler = null;
+        }
+    }
+
+    private static void StartMouseWatchThread()
+    {
+        _mouseWatchThread = new Thread(MouseWatchLoop)
+        {
+            IsBackground = true,
+            Name = "WinIsland.MouseWatch",
+        };
+        _mouseWatchThread.Start();
+    }
+
+    private static void MouseWatchLoop()
+    {
+        // 线程先拥有消息队列 —— 钩子回调要靠「线程处于消息等待」才会被投递进来
+        PeekMessage(out _, nint.Zero, 0, 0, PM_NOREMOVE);
+        nint hook = SetWindowsHookEx(WH_MOUSE_LL, _lowLevelMouseProc, nint.Zero, 0);
+
+        // MsgWaitForMultipleObjects 而非 GetMessage：既能立刻收到钩子回调，又能定期回头
+        // 看处理器是否已被摘掉（摘掉就退出并卸钩子，不留长期存在的全局钩子）。
+        while (IsMouseWatchWanted())
+        {
+            MsgWaitForMultipleObjects(0, nint.Zero, false, MouseWatchPollMs, QS_ALLINPUT);
+            while (PeekMessage(out var msg, nint.Zero, 0, 0, PM_REMOVE))
+            {
+                TranslateMessage(ref msg);
+                DispatchMessage(ref msg);
+            }
+        }
+
+        if (hook != nint.Zero) UnhookWindowsHookEx(hook);
+
+        lock (_mouseWatcherGate)
+        {
+            // 退出窗口期内又重新需要监听：补一个线程，否则这次安装会静默失效
+            _mouseWatchThread = null;
+            if (_mouseDownHandler != null) StartMouseWatchThread();
+        }
+    }
+
+    private static bool IsMouseWatchWanted()
+    {
+        lock (_mouseWatcherGate) return _mouseDownHandler != null;
+    }
+
+    private static nint OnLowLevelMouse(int nCode, nint wParam, nint lParam)
+    {
+        // 回调在监听线程上：只取坐标后立刻返回（系统对钩子回调耗时有超时限制）
+        if (nCode >= 0 && _mouseDownHandler is { } handler)
+        {
+            int msg = (int)wParam;
+            if (msg is WM_LBUTTONDOWN or WM_RBUTTONDOWN or WM_MBUTTONDOWN or WM_XBUTTONDOWN)
+            {
+                try
+                {
+                    handler(Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam).pt);
+                }
+                catch
+                {
+                    // 钩子回调里绝不能把异常抛出去
+                }
+            }
+        }
+
+        return CallNextHookEx(nint.Zero, nCode, wParam, lParam);
     }
 
     // ---- 任务栏条带：底部模式下把岛嵌进任务栏条带 ----

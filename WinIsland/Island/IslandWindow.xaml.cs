@@ -1,4 +1,5 @@
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -86,6 +87,13 @@ public sealed partial class IslandWindow : Window
     private bool _shown;
     private bool _hover;
     private bool _expanded;
+    /// <summary>
+    /// 触控展开：触摸没有悬停语义 —— 手指抬起就是 PointerExited，若按鼠标那样在退出时收起，
+    /// 就成了「刚展开就瞬间收起」。所以触控展开是常驻的：不再由鼠标进出裁决，只由
+    /// 「点了岛外」（<see cref="Win32.InstallMouseDownWatcher"/>）或前台窗口变化来收。
+    /// volatile：全局按下监听跑在钩子线程上，它要读这个标志决定要不要切回 UI 线程。
+    /// </summary>
+    private volatile bool _touchExpand;
     /// <summary>聚光卡（超级展开）打开期间：岛体整块藏起来，看门狗/悬停也不再驱动它。</summary>
     private bool _spotlightOccluded;
     private int _fadeVersion;
@@ -359,6 +367,7 @@ public sealed partial class IslandWindow : Window
             _shown = false;
             TeardownQueue();
             _expanded = false;
+            ClearTouchExpand();
             FadeIslandOpacity(0, SpotlightFadeOutMs, () =>
             {
                 if (!_spotlightOccluded) return;
@@ -598,6 +607,8 @@ public sealed partial class IslandWindow : Window
         if (live == null)
         {
             _expanded = false;
+            // 没有活动内容了，常驻展开没有意义：留着它会让下一个注册的插件凭空自动展开
+            ClearTouchExpand();
             TeardownQueue();
             ContentHost.Content = _idleContent;
             AnimateIslandSize(IdleSize, CollapseDuration);
@@ -605,7 +616,8 @@ public sealed partial class IslandWindow : Window
             return;
         }
 
-        bool wantExpand = _hover;
+        // 触控展开也是「展开」：内容刷新（插件 SetLive）时必须保持展开，否则一刷新就缩回去
+        bool wantExpand = _hover || _touchExpand;
 
         if (live.MorphView != null)
         {
@@ -835,14 +847,15 @@ public sealed partial class IslandWindow : Window
         }
     }
 
-    private void OnHoverEnter()
+    /// <summary>展开岛体。返回是否真的展开了 —— 没有可展开内容时返回 false（调用方据此决定要不要当成一次普通点击）。</summary>
+    private bool OnHoverEnter()
     {
-        if (_tempContent != null) return;
+        if (_tempContent != null) return false;
 
         var live = ActiveLive;
-        if (live == null) return;
-        if (live.MorphView == null && live.ExpandedContent == null) return;
-        if (_expanded) return;
+        if (live == null) return false;
+        if (live.MorphView == null && live.ExpandedContent == null) return false;
+        if (_expanded) return false;
 
         _expanded = true;
 
@@ -860,12 +873,15 @@ public sealed partial class IslandWindow : Window
         }
 
         BuildQueue();
+        return true;
     }
 
     private void OnHoverExit()
     {
         if (_tempContent != null) return;
         if (!_expanded) return;
+
+        ClearTouchExpand();
 
         // 先安全拆卸队列（停止动画 + 断开 Border.Child + 把主 View 放回 ContentHost）
         TeardownQueue();
@@ -1037,7 +1053,7 @@ public sealed partial class IslandWindow : Window
         _watchdog ??= CreateWatchdog();
         _watchdog.Start();
         // 前台窗口一变（点任务栏/开始菜单/搜索）就立刻查一次置顶，不必等一个轮询周期
-        Win32.InstallForegroundWatcher(() => DispatcherQueue.TryEnqueue(() => HealTopmost()));
+        Win32.InstallForegroundWatcher(() => DispatcherQueue.TryEnqueue(OnOtherWindowActivated));
 
         if (bottom)
         {
@@ -1483,6 +1499,18 @@ public sealed partial class IslandWindow : Window
     }
 
     /// <summary>
+    /// 别的窗口被激活（前台窗口变化，点任务栏/开始菜单/别的应用都算；也包括焦点变化）：
+    /// 既立刻查一次置顶，也收掉触控展开 —— 触摸点在其他应用上不一定产生鼠标消息
+    /// （原生处理 WM_POINTER 的应用会吃掉它，低级鼠标钩子就看不到），
+    /// 前台/焦点变化是这类情况的兜底信号。
+    /// </summary>
+    private void OnOtherWindowActivated()
+    {
+        HealTopmost();
+        DismissTouchExpand();
+    }
+
+    /// <summary>
     /// 把岛屿的「真实布局形状」写入窗口形状（SetWindowRgn）：形状之外不绘制也不参与命中测试，
     /// 透明画布区域的点击/触摸因此会真正落到下层窗口（跨进程有效）。
     /// 形状按岛体的圆角生成 —— 若用矩形近似，圆角外侧那几块像素会被窗口表面填充成白色实块。
@@ -1591,6 +1619,7 @@ public sealed partial class IslandWindow : Window
             StopPositionSlide();
             _hoverGuard.Stop();
             _hover = false;
+            ClearTouchExpand();
             AppWindow.Hide();
         }
     }
@@ -1633,8 +1662,13 @@ public sealed partial class IslandWindow : Window
 
     private void IslandRoot_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
-        _hover = true;
-        _hoverGuard.Start();
+        // 触控没有悬停语义（按下即进入、抬起即退出），不参与悬停状态：
+        // 触控的展开由 IslandRoot_Tapped 里的 TouchExpand 负责。
+        if (!IsTouchPointer(e))
+        {
+            _hover = true;
+            _hoverGuard.Start();
+        }
 
         if (_tempContent != null)
         {
@@ -1642,11 +1676,18 @@ public sealed partial class IslandWindow : Window
             _tempTimer.Start();
             return;
         }
+
+        if (IsTouchPointer(e)) return;
         OnHoverEnter();
     }
 
     private void IslandRoot_PointerExited(object sender, PointerRoutedEventArgs e)
     {
+        // 手指抬起就是 PointerExited —— 这不是「离开」，触控展开要留着，点岛外才收
+        if (IsTouchPointer(e)) return;
+        // 触控展开常驻期间，鼠标进出也不裁决收起：一次触摸点击会连带产生鼠标事件，
+        // 不然手指一抬就被鼠标语义收掉，又回到「刚展开就瞬间收起」
+        if (_touchExpand) return;
         if (QueuePanel.Visibility == Visibility.Visible) return;
         if (IsCursorOverIsland()) return;
         _hover = false;
@@ -1658,12 +1699,15 @@ public sealed partial class IslandWindow : Window
 
     private void IslandStack_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
+        if (IsTouchPointer(e)) return;
         _hover = true;
         _hoverGuard.Start();
     }
 
     private void IslandStack_PointerExited(object sender, PointerRoutedEventArgs e)
     {
+        if (IsTouchPointer(e)) return;
+        if (_touchExpand) return;
         if (IsCursorOverIsland()) return;
         _hover = false;
         _hoverGuard.Stop();
@@ -1685,8 +1729,67 @@ public sealed partial class IslandWindow : Window
             return;
         }
 
+        // 触控点一下岛 = 展开（触摸没有悬停，展开只能由点击驱动）：这一下点击就是「展开」本身，
+        // 不再往下传给插件的 OnTap；岛已经展开后再点，才是一次真正的插件点击。
+        if (e.PointerDeviceType == PointerDeviceType.Touch && !_expanded && TouchExpand()) return;
+
         ActiveLive?.OnTap?.Invoke();
     }
+
+    /// <summary>
+    /// 触控展开：展开并常驻，同时开始监听全局按下 —— 岛窗拿不到岛外的任何输入（形状裁剪 +
+    /// 不抢焦点），「点其他地方收起」只能靠系统级的按下事件。返回是否真的展开了。
+    /// </summary>
+    private bool TouchExpand()
+    {
+        if (!OnHoverEnter()) return false;
+        _touchExpand = true;
+        Win32.InstallMouseDownWatcher(OnGlobalMouseDown);
+        return true;
+    }
+
+    /// <summary>结束触控展开的常驻状态（撤销全局按下监听）；收起岛体不在这里。</summary>
+    private void ClearTouchExpand()
+    {
+        if (!_touchExpand) return;
+        _touchExpand = false;
+        Win32.UninstallMouseDownWatcher();
+    }
+
+    /// <summary>点了岛外：结束触控展开并收起岛体。</summary>
+    private void DismissTouchExpand()
+    {
+        if (!_touchExpand) return;
+        ClearTouchExpand();
+        if (_tempContent != null) return;
+        OnHoverExit();
+    }
+
+    /// <summary>
+    /// 全局按下（监听线程）：触控展开期间点在岛体（含队列卡片）以外就收起。
+    /// 判定要用 UI 线程上的实时岛体矩形，所以这里只把坐标搬过去，逻辑全在 UI 线程跑。
+    /// </summary>
+    private void OnGlobalMouseDown(Win32.POINT pt)
+    {
+        if (!_touchExpand) return;
+        DispatcherQueue.TryEnqueue(() => DismissTouchExpandIfOutside(pt));
+    }
+
+    private void DismissTouchExpandIfOutside(Win32.POINT pt)
+    {
+        if (!_touchExpand) return;
+
+        var island = IslandScreenRect();
+        bool inside = pt.X >= island.Left && pt.X <= island.Right
+                      && pt.Y >= island.Top && pt.Y <= island.Bottom;
+        if (inside) return;
+
+        DismissTouchExpand();
+    }
+
+    /// <summary>触控指针：没有悬停（按下 Entered、抬起 Exited），所有悬停语义都要绕开它。</summary>
+    private static bool IsTouchPointer(PointerRoutedEventArgs e)
+        => e.Pointer.PointerDeviceType == PointerDeviceType.Touch;
 
     /// <summary>点击源是否落在"自己处理点击"的控件里（按钮、滑块、开关、可拖动的进度条等）。</summary>
     private static bool IsInteractiveSource(object? source)
@@ -1705,6 +1808,7 @@ public sealed partial class IslandWindow : Window
     private void HoverGuardTick()
     {
         if (!_hover) return;
+        if (_touchExpand) return;      // 触控展开常驻：鼠标位置不参与收起裁决
         if (!IsCursorOverIsland())
         {
             _hover = false;
