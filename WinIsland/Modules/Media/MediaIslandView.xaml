@@ -246,15 +246,39 @@
                 Foreground="#80FFFFFF"
                 VerticalAlignment="Center"
                 Text="{x:Bind ViewModel.PositionText, Mode=OneWay}" />
-            <ProgressBar
-                x:Name="ProgressBar"
+            <Grid
+                x:Name="ProgressArea"
                 Grid.Column="1"
-                Minimum="0"
-                Maximum="1"
-                Value="{x:Bind ViewModel.Progress, Mode=OneWay}"
-                VerticalAlignment="Center"
-                ShowError="False"
-                ShowPaused="False" />
+                Height="12"
+                Background="Transparent"
+                PointerCaptureLost="ProgressArea_PointerCaptureLost"
+                PointerMoved="ProgressArea_PointerMoved"
+                PointerPressed="ProgressArea_PointerPressed"
+                PointerReleased="ProgressArea_PointerReleased"
+                Tapped="ProgressArea_Tapped"
+                VerticalAlignment="Center">
+                <Border
+                    Height="4"
+                    VerticalAlignment="Center"
+                    Background="#33FFFFFF"
+                    CornerRadius="2" />
+                <Border
+                    x:Name="ProgressFill"
+                    Width="0"
+                    Height="4"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center"
+                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                    CornerRadius="2" />
+                <Ellipse
+                    x:Name="ProgressKnob"
+                    Width="9"
+                    Height="9"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center"
+                    Fill="White"
+                    Visibility="Collapsed" />
+            </Grid>
             <TextBlock
                 x:Name="DurationText"
                 Grid.Column="2"

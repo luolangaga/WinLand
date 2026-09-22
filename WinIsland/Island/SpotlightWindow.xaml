@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Window
+    x:Class="WinIsland.Island.SpotlightWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="WinIsland Spotlight"
+    mc:Ignorable="d">
+
+    <!-- 聚光卡全屏覆盖窗：一整块透明画布，从下到上依次是遮罩 → 卡片 → 提示。
+         点击遮罩（= 卡片外任何位置）收起；卡片在遮罩上层，点卡片不会触发收起。
+         动画全部走 Composition（Offset / Scale / RotationAngleInDegrees / Opacity），
+         这里只负责布局，XAML 里不写任何 Storyboard。 -->
+    <Canvas x:Name="RootCanvas" Background="Transparent" RequestedTheme="Dark">
+        <Rectangle
+            x:Name="Scrim"
+            Fill="#FF000000"
+            PointerPressed="Scrim_PointerPressed" />
+        <Border
+            x:Name="Card"
+            Background="#F50C0C10"
+            BorderBrush="#1AFFFFFF"
+            BorderThickness="1"
+            CornerRadius="28">
+            <ContentPresenter x:Name="SpotlightHost" />
+        </Border>
+        <TextBlock
+            x:Name="Hint"
+            Text="点击卡片外区域或按 Esc 收起"
+            FontSize="12"
+            Foreground="#73FFFFFF" />
+    </Canvas>
+</Window>

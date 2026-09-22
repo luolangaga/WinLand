@@ -9,9 +9,11 @@ public sealed class MediaViewModel : INotifyPropertyChanged
 {
     private string _title = "";
     private string _artist = "";
+    private string _albumTitle = "";
     private string _sourceAppName = "";
     private bool _isPlaying;
     private bool _glowEnabled = true;
+    private bool _lyricsEnabled = true;
     private ImageSource? _thumbnail;
     private ImageSource? _sourceAppIcon;
     private TimeSpan _position;
@@ -29,6 +31,7 @@ public sealed class MediaViewModel : INotifyPropertyChanged
     public Action? SwitchToNextSession { get; set; }
     public Action? SwitchToPrevSession { get; set; }
     public Action? RefreshTimeline { get; set; }
+    public Action<TimeSpan>? SeekTo { get; set; }
 
     public string Title
     {
@@ -40,6 +43,18 @@ public sealed class MediaViewModel : INotifyPropertyChanged
     {
         get => _artist;
         set => SetField(ref _artist, value);
+    }
+
+    public string AlbumTitle
+    {
+        get => _albumTitle;
+        set => SetField(ref _albumTitle, value);
+    }
+
+    public bool LyricsEnabled
+    {
+        get => _lyricsEnabled;
+        set => SetField(ref _lyricsEnabled, value);
     }
 
     public bool IsPlaying
@@ -169,7 +184,7 @@ public sealed class MediaViewModel : INotifyPropertyChanged
     public Visibility ThumbnailVisibility => _thumbnail != null ? Visibility.Visible : Visibility.Collapsed;
     public Visibility PlaceholderVisibility => _thumbnail == null ? Visibility.Visible : Visibility.Collapsed;
 
-    private static string FormatTime(TimeSpan t)
+    public static string FormatTime(TimeSpan t)
     {
         if (t.TotalHours >= 1)
             return $"{(int)t.TotalHours}:{t.Minutes:D2}:{t.Seconds:D2}";

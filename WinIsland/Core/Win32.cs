@@ -255,6 +255,77 @@ internal static partial class Win32
     }
 
     /// <summary>
+    /// 聚光卡的全屏覆盖窗样式：与岛体同款（无边框弹出 + 工具窗口 + 不抢焦点 + 置顶 + 真透明）。
+    /// 三层白边防护与 alpha 合成对覆盖窗同样必要，所以共用同一份实现，只是名字点明用途。
+    /// </summary>
+    public static void MakeOverlayStyle(nint hwnd) => MakeIslandStyle(hwnd);
+
+    // ---- Esc 热键（聚光卡用）：覆盖窗是 WS_EX_NOACTIVATE，拿不到键盘焦点，只能注册系统热键 ----
+
+    private const int WM_HOTKEY = 0x0312;
+    private const uint MOD_NOREPEAT = 0x4000;
+    private const uint VK_ESCAPE = 0x1B;
+    private const int EscapeHotKeyId = 0x5750;
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool RegisterHotKey(nint hWnd, int id, uint fsModifiers, uint vk);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool UnregisterHotKey(nint hWnd, int id);
+
+    [DllImport("comctl32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RemoveWindowSubclass(nint hWnd, SubclassProc pfnSubclass, nuint uIdSubclass);
+
+    // 静态持有委托，防止被 GC 回收；同时只有一个覆盖窗，单个处理器足够
+    private static readonly SubclassProc _hotKeyProc = HotKeyProc;
+    private static Action? _hotKeyHandler;
+
+    /// <summary>
+    /// 给窗口注册 Esc 热键并挂上 WM_HOTKEY 处理。返回 false 表示注册失败
+    /// （例如热键已被别的程序占用）——调用方无需补救，点击卡片外区域仍然能关闭。
+    /// </summary>
+    public static bool InstallEscapeHotKey(nint hwnd, Action onPressed)
+    {
+        if (!RegisterHotKey(hwnd, EscapeHotKeyId, MOD_NOREPEAT, VK_ESCAPE))
+        {
+            return false;
+        }
+
+        _hotKeyHandler = onPressed;
+        SetWindowSubclass(hwnd, _hotKeyProc, 0x15AE, 0);
+        return true;
+    }
+
+    /// <summary>注销 Esc 热键并摘掉处理器（顺序与 <see cref="InstallEscapeHotKey"/> 相反）。</summary>
+    public static void UninstallEscapeHotKey(nint hwnd)
+    {
+        UnregisterHotKey(hwnd, EscapeHotKeyId);
+        RemoveWindowSubclass(hwnd, _hotKeyProc, 0x15AE);
+        _hotKeyHandler = null;
+    }
+
+    private static nint HotKeyProc(nint hWnd, uint uMsg, nint wParam, nint lParam, nuint uIdSubclass, nint dwRefData)
+    {
+        if (uMsg == WM_HOTKEY && (int)wParam == EscapeHotKeyId)
+        {
+            try
+            {
+                _hotKeyHandler?.Invoke();
+            }
+            catch
+            {
+                // 热键线程/回调里绝不能抛出去
+            }
+            return 0;
+        }
+
+        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+
+    /// <summary>
     /// 只在窗口真的被压住时重新置顶，返回压住它的窗口描述（null = 没被压住、什么都没做）。
     /// 判定「被压住」的唯一标准是：岛体矩形上方存在任意可见且与其相交的窗口 ——
     /// 任务栏、开始菜单、搜索浮层都是置顶窗口，谁最后断言谁在上层。
@@ -546,24 +617,6 @@ internal static partial class Win32
 
     /// <summary>安装样式守卫，永久阻止任何代码给窗口加回边框样式。</summary>
     public static void InstallStyleGuard(nint hwnd) => SetWindowSubclass(hwnd, _styleGuardProc, 0x15AD, 0);
-
-    [ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    internal interface IApplicationActivationManager
-    {
-        nint ActivateApplication(string appUserModelId, string? args, uint options, out uint processId);
-        nint ActivateForFile(string appUserModelId, nint itemArray, string verb, out uint processId);
-        nint ActivateForProtocol(string appUserModelId, nint itemArray, out uint processId);
-    }
-
-    [ComImport, Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")]
-    internal class ApplicationActivationManager { }
-
-    public static uint ActivateApp(string appUserModelId)
-    {
-        var mgr = (IApplicationActivationManager)new ApplicationActivationManager();
-        mgr.ActivateApplication(appUserModelId, null, 0, out uint pid);
-        return pid;
-    }
 
     [LibraryImport("shell32.dll", EntryPoint = "ExtractIconExW", StringMarshalling = StringMarshalling.Utf16)]
     public static partial uint ExtractIconEx(string szFileName, int nIconIndex, nint[]? phiconLarge, nint[]? phiconSmall, uint nIcons);

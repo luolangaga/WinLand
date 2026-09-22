@@ -52,7 +52,7 @@ public partial class App : Application
         {
             _settings = new SettingsService();
             _island = new IslandWindow(_settings, _logs);
-            _service = new IslandService(_island, _settings);
+            _service = new IslandService(_island, _settings, _logs.Host);
             _service.SettingsOpenRequested += OpenSettingsWindow;
 
             _plugins = new PluginHost(_service, _settings, _island.DispatcherQueue, _logs);

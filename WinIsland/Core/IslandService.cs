@@ -8,12 +8,14 @@ public sealed class IslandService
 {
     private readonly IslandWindow _island;
     private readonly SettingsService _settings;
+    private readonly SpotlightHost _spotlight;
     private readonly List<SettingsPageDescriptor> _pages = new();
 
-    public IslandService(IslandWindow island, SettingsService settings)
+    public IslandService(IslandWindow island, SettingsService settings, IPluginLogger log)
     {
         _island = island;
         _settings = settings;
+        _spotlight = new SpotlightHost(island, log);
     }
 
     public event Action? SettingsPagesChanged;
@@ -46,6 +48,12 @@ public sealed class IslandService
 
     public void DismissTemporary(string ownerId)
         => RunOnUI(() => _island.DismissTemporary(ownerId));
+
+    public void OpenSpotlight(string ownerId, IslandSpotlight spotlight)
+        => RunOnUI(() => _spotlight.Show(ownerId, spotlight));
+
+    public void CloseSpotlight(string ownerId)
+        => RunOnUI(() => _spotlight.Close(ownerId));
 
     public void AddSettingsPage(SettingsPageDescriptor page)
         => RunOnUI(() =>

@@ -2,6 +2,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
@@ -46,6 +47,9 @@ public sealed partial class IslandWindow : Window
     /// <summary>底部模式靠右、且量不到托盘区（TrayNotifyWnd）时的兜底预留量。</summary>
     private const double TrayReserve = 220;
     private const int PositionSlideMs = 300;
+    /// <summary>聚光卡打开时岛体淡出、关闭后淡入的时长（只动透明度，不碰窗口几何）。</summary>
+    private const int SpotlightFadeOutMs = 140;
+    private const int SpotlightFadeInMs = 180;
     /// <summary>
     /// 看门狗轮询周期：任务栏跟随 + 置顶自愈。shell 会在你点任务栏/开始菜单/搜索时把自己
     /// 抬到所有置顶窗口之上，岛整块被盖住，所以这个周期就是「被盖住到顶回来」的最坏延迟，取短一些。
@@ -82,6 +86,9 @@ public sealed partial class IslandWindow : Window
     private bool _shown;
     private bool _hover;
     private bool _expanded;
+    /// <summary>聚光卡（超级展开）打开期间：岛体整块藏起来，看门狗/悬停也不再驱动它。</summary>
+    private bool _spotlightOccluded;
+    private int _fadeVersion;
     private Size _currentIsland;
     private int _windowPhysW;
     private int _windowPhysH;
@@ -308,6 +315,111 @@ public sealed partial class IslandWindow : Window
         UpdateVisibility();
         EnsureCanvas();
         ApplyCanvasBounds();
+    }
+
+    /// <summary>主岛当前渲染尺寸（DIP）。聚光卡的飞入起点/收回终点按它做缩放比。</summary>
+    internal Size MainIslandSizeDip()
+        => new(
+            IslandRoot.ActualWidth > 0 ? IslandRoot.ActualWidth : _currentIsland.Width,
+            IslandRoot.ActualHeight > 0 ? IslandRoot.ActualHeight : _currentIsland.Height);
+
+    /// <summary>
+    /// 主岛（不含队列卡片）的屏幕矩形，物理像素。岛体隐藏期间同样可算 ——
+    /// 聚光卡收回动画的落点就用它。
+    /// </summary>
+    internal Win32.RECT MainIslandScreenRect()
+    {
+        var pos = AppWindow.Position;
+        var rect = MainIslandShapeRect(Scale);
+        return new Win32.RECT
+        {
+            Left = pos.X + rect.X1,
+            Top = pos.Y + rect.Y1,
+            Right = pos.X + rect.X2,
+            Bottom = pos.Y + rect.Y2,
+        };
+    }
+
+    internal IslandStyleKind CurrentStyleKind => _style;
+
+    internal bool IsMaterialApplied => _materialApplied;
+
+    /// <summary>
+    /// 聚光卡打开/关闭时遮挡或恢复岛体：这是岛体「被别的东西盖住」的唯一入口，
+    /// 只做整块淡入淡出 + 窗口显示/隐藏，绝不改窗口几何（几何不变式优先）。
+    /// </summary>
+    internal void SetSpotlightOccluded(bool occluded)
+    {
+        if (occluded == _spotlightOccluded) return;
+        _spotlightOccluded = occluded;
+
+        if (occluded)
+        {
+            // 先摘掉「在场」状态：看门狗与前台监听不会再尝试把岛顶回置顶层（会盖住聚光卡）
+            _shown = false;
+            TeardownQueue();
+            _expanded = false;
+            FadeIslandOpacity(0, SpotlightFadeOutMs, () =>
+            {
+                if (!_spotlightOccluded) return;
+                StopPositionSlide();
+                _hoverGuard.Stop();
+                _hover = false;
+                AppWindow.Hide();
+            });
+            return;
+        }
+
+        UpdateVisibility(force: true);
+        if (!_shown)
+        {
+            IslandRoot.Opacity = 1;
+            return;
+        }
+
+        RestoreSpotlightView();
+        IslandRoot.Opacity = 0;
+        FadeIslandOpacity(1, SpotlightFadeInMs, null);
+    }
+
+    /// <summary>聚光卡关闭后的内容还原：临时消息优先，否则按当前状态回到空闲/紧凑/展开。</summary>
+    private void RestoreSpotlightView()
+    {
+        if (_tempContent != null)
+        {
+            ContentHost.Content = _tempContent;
+            AnimateIslandSize(_tempSize, CollapseDuration, isTemporary: true);
+            ApplyCornerRadius(_tempSize.Height, expanded: false);
+            return;
+        }
+
+        TransitionToLiveState();
+    }
+
+    /// <summary>岛体整块淡入/淡出：只动 Opacity 的独立动画，窗口几何全程不变。</summary>
+    private void FadeIslandOpacity(double to, int milliseconds, Action? onDone)
+    {
+        int version = ++_fadeVersion;
+
+        var animation = new DoubleAnimation
+        {
+            From = IslandRoot.Opacity,
+            To = to,
+            Duration = new Duration(TimeSpan.FromMilliseconds(milliseconds)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+        Storyboard.SetTarget(animation, IslandRoot);
+        Storyboard.SetTargetProperty(animation, "Opacity");
+
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(animation);
+        storyboard.Completed += (_, _) =>
+        {
+            if (version != _fadeVersion) return;
+            IslandRoot.Opacity = to;
+            onDone?.Invoke();
+        };
+        storyboard.Begin();
     }
 
     /// <summary>
@@ -1364,14 +1476,7 @@ public sealed partial class IslandWindow : Window
         // 主岛（空闲 / 活动 / 临时消息都走这里）：形状必须与岛体「当前渲染尺寸」严格一致。
         // 绝不能取动画目标尺寸 —— 目标比内容多出来的那一圈会落进形状里，
         // 由窗口表面填成不透明白色，切换瞬间就会闪白块。
-        double iw = IslandRoot.ActualWidth > 0 ? IslandRoot.ActualWidth : _currentIsland.Width;
-        double ih = IslandRoot.ActualHeight > 0 ? IslandRoot.ActualHeight : _currentIsland.Height;
-        double ix = IslandLeftInWindow(s, iw);
-        double iy = IslandTopInWindow(_bottomAnchored, s, ih);
-        rects.Add(new ShapeRect(
-            (int)Math.Round(ix), (int)Math.Round(iy),
-            (int)Math.Round(ix + iw * s), (int)Math.Round(iy + ih * s),
-            (int)Math.Round(IslandRoot.CornerRadius.TopLeft * s)));
+        rects.Add(MainIslandShapeRect(s));
 
         // 队列小岛：各子元素的实际布局矩形与圆角（DIP → 物理）
         foreach (var child in QueuePanel.Children)
@@ -1422,11 +1527,29 @@ public sealed partial class IslandWindow : Window
     /// <summary>形状用矩形（物理像素）：X1,Y1,X2,Y2 为外接矩形，Radius 为圆角半径。</summary>
     private readonly record struct ShapeRect(int X1, int Y1, int X2, int Y2, int Radius);
 
+    /// <summary>
+    /// 主岛当前的渲染矩形与圆角（物理像素），<see cref="UpdateHitRegion"/> 与
+    /// <see cref="MainIslandScreenRect"/> 共用同一份算法，保证窗口形状与聚光卡的落点永远一致。
+    /// 只看 ActualWidth/ActualHeight（当前渲染尺寸），不看动画目标。
+    /// </summary>
+    private ShapeRect MainIslandShapeRect(double scale)
+    {
+        double iw = IslandRoot.ActualWidth > 0 ? IslandRoot.ActualWidth : _currentIsland.Width;
+        double ih = IslandRoot.ActualHeight > 0 ? IslandRoot.ActualHeight : _currentIsland.Height;
+        double ix = IslandLeftInWindow(scale, iw);
+        double iy = IslandTopInWindow(_bottomAnchored, scale, ih);
+        return new ShapeRect(
+            (int)Math.Round(ix), (int)Math.Round(iy),
+            (int)Math.Round(ix + iw * scale), (int)Math.Round(iy + ih * scale),
+            (int)Math.Round(IslandRoot.CornerRadius.TopLeft * scale));
+    }
+
     private void UpdateVisibility(bool force = false)
     {
         bool hideIdle = _settings.Get("island.hideWhenIdle", false);
         bool visible = _settings.Get("island.visible", true)
                        && !(_bottomAnchored && _taskbarHidden)
+                       && !_spotlightOccluded
                        && !(hideIdle && ActiveLive == null && _tempContent == null);
         if (!force && visible == _shown) return;
         _shown = visible;
@@ -1527,16 +1650,32 @@ public sealed partial class IslandWindow : Window
 
     private void IslandRoot_Tapped(object sender, TappedRoutedEventArgs e)
     {
-        if (_tempContent != null && e.OriginalSource is not Microsoft.UI.Xaml.Controls.Primitives.ButtonBase)
+        // 点插件自己的按钮/滑块不算"点岛体"：按钮内部的图标和文字才是 OriginalSource，
+        // 必须顺着可视树上溯找祖先控件 —— 以前只看 OriginalSource 是不是 ButtonBase，
+        // 结果点播控按钮也会触发 OnTap（点一下播放就弹出静音卡/聚光卡）。
+        if (IsInteractiveSource(e.OriginalSource)) return;
+
+        if (_tempContent != null)
         {
             DismissTemporary();
             return;
         }
 
-        if (e.OriginalSource is not Microsoft.UI.Xaml.Controls.Primitives.ButtonBase)
+        ActiveLive?.OnTap?.Invoke();
+    }
+
+    /// <summary>点击源是否落在"自己处理点击"的控件里（按钮、滑块、开关、可拖动的进度条等）。</summary>
+    private static bool IsInteractiveSource(object? source)
+    {
+        for (var element = source as DependencyObject; element != null; element = VisualTreeHelper.GetParent(element))
         {
-            ActiveLive?.OnTap?.Invoke();
+            if (element is ButtonBase or Slider or ToggleSwitch or CheckBox or ComboBox or TextBox or ProgressBar)
+            {
+                return true;
+            }
         }
+
+        return false;
     }
 
     private void HoverGuardTick()

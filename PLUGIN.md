@@ -109,6 +109,7 @@ Dispose/卸载 → Unloading → 程序集请求卸载并验证回收
 | `Log` | `Debug/Info/Warn/Error`，写入插件日志（内存环形缓冲 + 文件） |
 | `Settings` | **作用域化**设置存储，键自动加 `<id>.` 前缀（`Settings.Set("enabled", true)` → `hw-monitor.enabled`） |
 | `Island.SetContent(content)` | 注册常驻内容（`null` 取消）。owner 由宿主绑定为插件 Id |
+| `Island.OpenSpotlight(spotlight)` / `Island.CloseSpotlight()` | 打开 / 收起「超级展开」聚光卡（见下方同名小节） |
 | `Island.ShowMessage(msg)` | 临时消息（标题 + 正文 + 图标 + 时长） |
 | `Island.Show(uiElement, size, duration)` | 临时展示任意控件 |
 | `Island.AddSettingsPage(desc)` | 注册设置页（停用时自动移除） |
@@ -176,6 +177,41 @@ void OnMorphTick()
 
 需要「临时不占岛」时，推荐像 `samples/HardwareMonitor` 那样加一个 `enabled` 设置：
 关掉时 `SetContent(null)`，打开时重新 `SetContent(content)`，插件本身继续运行。
+
+### 超级展开（Spotlight 聚光卡）
+
+要展示的信息比大岛能装下的更多时，**不要在岛里继续塞元素** —— 让点击打开「超级展开」：
+一张居中的大卡片从岛体当前位置带倾角飞入并放大，点击卡片外区域或按 `Esc` 反向动画收回。
+**何时打开完全由插件决定**（岛体 `OnTap`、定时器、外部事件都行），卡片尺寸与内容也由插件决定。
+
+```csharp
+private void OpenDetail()
+{
+    _detailView ??= new MyDetailView(_vm);              // 必须是独立可视树，见下
+    Context.Island.OpenSpotlight(new IslandSpotlight
+    {
+        Content = _detailView,
+        Size = new Windows.Foundation.Size(760, 470),   // 期望尺寸（DIP）
+        OnClosed = () => _detailView.OnHostClosed(),    // 任何关闭路径都会回调一次
+    });
+}
+
+// 想程序化收起：Context.Island.CloseSpotlight();
+```
+
+| 成员 | 说明 |
+|------|------|
+| `Content` | 卡片内容。**必须是独立于岛视图的可视树**：每个窗口一棵树，同一个 `UIElement` 不能同时挂在两个窗口里 |
+| `Size` | 期望尺寸（DIP）。宿主居中摆放并把尺寸夹到显示器工作区 92% 以内，视图请用自适应布局 |
+| `OnClosed` | 关闭回调（点卡片外 / `Esc` / 自己调 `CloseSpotlight` / 插件被停用 / 被别的插件替换）。宿主已做异常保护 |
+
+必须知道的行为：
+
+* **动画、遮罩、层级全由宿主负责**，插件只提供一棵内容树；打开期间全屏点击都被覆盖窗接管 —— 这正是「点卡片外收起」的实现方式。
+* **点插件自己的按钮/滑块不会触发 `OnTap`**：宿主会顺着可视树上溯识别交互控件（`ButtonBase` / `Slider` / `ToggleSwitch` / 自绘进度条等，自绘控件记得在 `Tapped` 里 `e.Handled = true`），只有点内容空白处才算「点了岛体/卡片」。
+* **生命周期跟着 `Loaded` / `Unloaded` 走**：收起时宿主会把内容从可视树卸下，视图收到 `Unloaded`（定时器在 `Loaded` 里起、`Unloaded` 里停）；`OnClosed` 用来做取消网络请求之类的收尾。视图实例可以复用，重复打开不必重建。
+* 同一时刻**只有一张**聚光卡：别的插件再次请求时替换，旧 owner 会先收到 `OnClosed`；插件停用/卸载时宿主自动收起它的卡片，不留幽灵窗口。
+* 宿主低于 2.1.0 时这些 API 不存在，调用会抛 `MissingMethodException`（宿主按插件异常捕获并记日志）。要用它就把 `plugin.json` 的 `min_host_version` 提到 `"2.1.0"`；`api_version` 仍然是 `2`（纯增量 API）。
 
 ---
 
@@ -352,4 +388,6 @@ pwsh tools/pack-plugin.ps1 -ProjectDir samples\HelloPlugin
 | 插件针对 WinIsland.Core x.y 构建，与宿主不兼容 | SDK 大版本不一致，用 SDK 2.x 重新编译 |
 | 已忽略调用 xxx：插件当前状态为 已停用 | 停用后仍有回调（定时器/网络回调），属正常保护 |
 | 形态动画执行失败 | 插件动画抛异常（多为 §8 的 Storyboard 问题），宿主已忽略并记日志 |
+| 聚光卡打不开 / 一片空白 | `Content` 复用了岛视图里那个 `UIElement`（每个窗口一棵树，必须新建视图）；或宿主版本低于 2.1.0（日志里会有 `MissingMethodException`，`plugin.json` 写 `min_host_version: "2.1.0"`） |
+| 聚光卡一直不消失 | 卡片是模态的：点卡片外区域或按 `Esc` 收起，插件也可以自己调 `CloseSpotlight()` |
 | 帧率显示 `--` | 读取前台窗口帧率需要**以管理员身份运行 WinIsland**（ETW）；普通权限下显示桌面合成帧率 |

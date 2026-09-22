@@ -51,6 +51,9 @@ public static class IslandStyle
     private const double FluentCompactRadius = 8;
     private const double FluentExpandedRadius = 12;
     private const double FluentQueueRadius = 8;
+    // 聚光卡（超级展开）：一张独立的大卡片，圆角比岛体舒展
+    private const double AppleSpotlightRadius = 28;
+    private const double FluentSpotlightRadius = 20;
 
     private static readonly Color AppleSurface = Color.FromArgb(255, 0, 0, 0);
     private static readonly Color FluentSurface = Color.FromArgb(64, 0, 0, 0);
@@ -58,6 +61,10 @@ public static class IslandStyle
     private static readonly Color FluentStroke = Color.FromArgb(20, 255, 255, 255);
     private static readonly Color AppleIdleDot = Color.FromArgb(255, 46, 46, 50);
     private static readonly Color FluentIdleDot = Color.FromArgb(115, 255, 255, 255);
+    private static readonly Color AppleSpotlightSurface = Color.FromArgb(245, 12, 12, 16);
+    private static readonly Color FluentSpotlightSurface = Color.FromArgb(232, 38, 38, 42);
+    private static readonly Color FluentSpotlightSolidSurface = Color.FromArgb(235, 26, 26, 30);
+    private static readonly Color SpotlightStroke = Color.FromArgb(26, 255, 255, 255);
 
     public static IslandStyleKind ParseStyle(string? value)
         => string.Equals(value?.Trim(), FluentValue, StringComparison.OrdinalIgnoreCase)
@@ -113,4 +120,24 @@ public static class IslandStyle
     /// <summary>空闲小点颜色：纯黑胶囊上用深灰（现状），系统材质上用半透明白。</summary>
     public static Color IdleDotColor(IslandStyleKind style)
         => style == IslandStyleKind.Fluent ? FluentIdleDot : AppleIdleDot;
+
+    /// <summary>聚光卡圆角。</summary>
+    public static double ResolveSpotlightRadius(IslandStyleKind style)
+        => style == IslandStyleKind.Fluent ? FluentSpotlightRadius : AppleSpotlightRadius;
+
+    /// <summary>
+    /// 聚光卡底衬：Apple 近不透明纯黑（延续灵动岛的黑胶囊身份），
+    /// Fluent 半透明炭灰（能看到被遮罩压暗的桌面，材质可用时更透一些保证"系统材质感"）。
+    /// 覆盖窗是独立的全屏透明窗，这里刻意不用元素级 Acrylic —— 那需要窗口自己的材质背衬，
+    /// 在「透明窗 + 遮罩」的组合里会退化成不可控的色块。
+    /// </summary>
+    public static SolidColorBrush CreateSpotlightFill(IslandStyleKind style, bool materialApplied)
+    {
+        if (style == IslandStyleKind.Apple) return new SolidColorBrush(AppleSpotlightSurface);
+        return new SolidColorBrush(materialApplied ? FluentSpotlightSurface : FluentSpotlightSolidSurface);
+    }
+
+    /// <summary>聚光卡描边：两种风格都用 1px 浅色描边，把卡片从暗化遮罩里"抠"出来。</summary>
+    public static SolidColorBrush CreateSpotlightStroke(IslandStyleKind style)
+        => new(SpotlightStroke);
 }

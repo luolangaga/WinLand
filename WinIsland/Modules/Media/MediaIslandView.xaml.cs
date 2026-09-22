@@ -1,6 +1,7 @@
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using WinIsland.Core;
@@ -42,7 +43,11 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
             if (e.PropertyName is nameof(MediaViewModel.IsPlaying)) SyncBars();
             if (e.PropertyName is nameof(MediaViewModel.IsPlaying) or nameof(MediaViewModel.GlowEnabled))
                 SyncGlow();
+            if (e.PropertyName is nameof(MediaViewModel.Progress) or nameof(MediaViewModel.HasProgress))
+                UpdateProgressVisual();
         };
+
+        ProgressArea.SizeChanged += (_, _) => UpdateProgressVisual();
 
         _glowTimer = DispatcherQueue.CreateTimer();
         _glowTimer.Interval = TimeSpan.FromMilliseconds(16);
@@ -368,5 +373,85 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
             _progressTimer.Start();
         else
             _progressTimer.Stop();
+
+        UpdateProgressVisual();
     }
+
+    #region 进度条：可点击/拖动跳转
+
+    private bool _dragging;
+
+    private void UpdateProgressVisual()
+    {
+        if (_dragging) return;
+
+        double width = ProgressArea.ActualWidth;
+        if (width <= 0) return;
+
+        ApplyRatio(ViewModel.Progress, width);
+        ProgressKnob.Visibility = ViewModel.HasProgress ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ApplyRatio(double ratio, double width)
+    {
+        double x = Math.Clamp(ratio, 0, 1) * width;
+        ProgressFill.Width = x;
+        double margin = Math.Clamp(x - ProgressKnob.Width / 2, 0, Math.Max(0, width - ProgressKnob.Width));
+        ProgressKnob.Margin = new Thickness(margin, 0, 0, 0);
+    }
+
+    /// <summary>进度条自己消化点击：不让它冒泡成「点了岛体」，否则拖一下进度就弹出聚光卡。</summary>
+    private void ProgressArea_Tapped(object sender, TappedRoutedEventArgs e) => e.Handled = true;
+
+    private void ProgressArea_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (!ViewModel.HasProgress) return;
+
+        _dragging = true;
+        ProgressArea.CapturePointer(e.Pointer);
+        UpdateDrag(e.GetCurrentPoint(ProgressArea).Position.X);
+        e.Handled = true;
+    }
+
+    private void ProgressArea_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_dragging) return;
+
+        UpdateDrag(e.GetCurrentPoint(ProgressArea).Position.X);
+        e.Handled = true;
+    }
+
+    private void ProgressArea_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_dragging) return;
+
+        double ratio = UpdateDrag(e.GetCurrentPoint(ProgressArea).Position.X);
+        _dragging = false;
+        ProgressArea.ReleasePointerCapture(e.Pointer);
+
+        var target = TimeSpan.FromTicks((long)(ViewModel.Duration.Ticks * ratio));
+        ViewModel.SeekTo?.Invoke(target);
+        PositionText.Text = MediaViewModel.FormatTime(target);
+        e.Handled = true;
+    }
+
+    private void ProgressArea_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        _dragging = false;
+        PositionText.Text = ViewModel.PositionText;
+    }
+
+    private double UpdateDrag(double x)
+    {
+        double width = ProgressArea.ActualWidth;
+        if (width <= 0) return 0;
+
+        double ratio = Math.Clamp(x / width, 0, 1);
+        ApplyRatio(ratio, width);
+        PositionText.Text = MediaViewModel.FormatTime(TimeSpan.FromTicks((long)(ViewModel.Duration.Ticks * ratio)));
+        ProgressKnob.Visibility = Visibility.Visible;
+        return ratio;
+    }
+
+    #endregion
 }

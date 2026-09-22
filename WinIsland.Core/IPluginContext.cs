@@ -27,6 +27,8 @@ public interface IIslandSurface
     void DismissTemporary();
     void AddSettingsPage(SettingsPageDescriptor page);
     void RemoveSettingsPage(string pageId);
+    void OpenSpotlight(IslandSpotlight spotlight);
+    void CloseSpotlight();
 }
 
 public interface IPluginLogger

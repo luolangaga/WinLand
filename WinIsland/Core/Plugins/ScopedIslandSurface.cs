@@ -10,6 +10,7 @@ public sealed class ScopedIslandSurface : IIslandSurface
     private readonly PluginScope _scope;
     private bool _contentRevokerRegistered;
     private bool _temporaryRevokerRegistered;
+    private bool _spotlightRevokerRegistered;
 
     public ScopedIslandSurface(PluginInstance owner, IslandService island, PluginScope scope)
     {
@@ -99,6 +100,44 @@ public sealed class ScopedIslandSurface : IIslandSurface
         }
 
         _island.RemoveSettingsPage(ScopedPageId(pageId));
+    }
+
+    public void OpenSpotlight(IslandSpotlight spotlight)
+    {
+        if (!_owner.TryEnter("OpenSpotlight"))
+        {
+            return;
+        }
+
+        if (spotlight?.Content is null)
+        {
+            return;
+        }
+
+        if (!_spotlightRevokerRegistered)
+        {
+            _spotlightRevokerRegistered = true;
+            _scope.Register(new ActionDisposable(() => _island.CloseSpotlight(_owner.Info.Id)));
+        }
+
+        _island.OpenSpotlight(_owner.Info.Id, new IslandSpotlight
+        {
+            Content = spotlight.Content,
+            Size = spotlight.Size,
+            OnClosed = spotlight.OnClosed == null
+                ? null
+                : () => _owner.InvokeGuarded("聚光卡关闭回调", spotlight.OnClosed),
+        });
+    }
+
+    public void CloseSpotlight()
+    {
+        if (!_owner.TryEnter("CloseSpotlight"))
+        {
+            return;
+        }
+
+        _island.CloseSpotlight(_owner.Info.Id);
     }
 
     private void RegisterTemporaryRevoker()

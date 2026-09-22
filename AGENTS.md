@@ -37,6 +37,7 @@ WinIsland/                    — Main application
   App.xaml.cs                — Entry: IslandWindow, IslandService, PluginHost, built-in manifests, global crash logging
   Core/
     IslandService.cs         — host-side content/temp/settings-page API (RemoveSettingsPage, page Order)
+    SpotlightHost.cs         — 「超级展开」聚光卡的生命周期：单实例/替换/关闭后放回岛体/通知旧 owner
     SettingsService.cs       — JSON key-value store at %LocalAppData%\WinIsland\settings.json
     Marketplace/             — plugin marketplace client: MarketplaceModels.cs (index.json schema 1) + MarketplaceService.cs
                                (single index.json request, ETag/TTL cache, mirror fallback, sha256-verified .lwp download)
@@ -56,7 +57,8 @@ WinIsland/                    — Main application
       PluginInfo.cs / PluginStateText.cs — runtime state shown in the plugin manager
   Island/
     IslandWindow.xaml.cs     — island window: state machine, size animation, hover, hit region, style switch, AnimateMorphView guard, position (top / bottom taskbar strip) + horizontal placement/offset, free-band placement, taskbar-follow poll
-    IslandStyle.cs           — appearance-style policy (Apple / Fluent): corner radius, surface fill, stroke, idle dot color
+    SpotlightWindow.xaml(.cs) — 「超级展开」聚光卡的全屏覆盖窗：暗化遮罩 + 居中大卡片，Composition 做"从主岛位置带倾角飞入 / 反向飞回"，点遮罩（卡片外）或 Esc 收起；窗口铺满主岛所在显示器，卡片按工作区居中并把插件声明的尺寸夹到工作区内
+    IslandStyle.cs           — appearance-style policy (Apple / Fluent): corner radius, surface fill, stroke, idle dot color, spotlight card radius/fill
     IslandBackdrop.cs        — window-level system material (Desktop Acrylic / Mica controllers, IsInputActive pinned true)
   Modules/
     Media/ Battery/ AiMonitor/ Messaging/ — built-in plugins (IslandPluginBase; complete shutdown, no leaks)
@@ -70,6 +72,7 @@ WinIsland/                    — Main application
 ## Key Design Rules
 
 - **Host owns chrome; plugins own content.** IslandWindow controls size, corner radius, hover, expand/collapse, temp message overlay. Plugins only provide XAML content via `IslandLiveContent`.
+- **「超级展开」聚光卡是独立的全屏覆盖窗，岛窗口的几何不变式完全不受影响。** 插件调 `IIslandSurface.OpenSpotlight(IslandSpotlight { Content, Size, OnClosed })`（SDK 2.1 增量 API，`api_version` 仍为 2，插件用 `min_host_version: "2.1.0"` 做门槛）；`SpotlightHost` 负责「同一时刻只有一张 / 被替换时先通知旧 owner / 插件停用即自动收起」，`SpotlightWindow` 负责全屏遮罩 + Composition 飞入飞回 + 点卡片外或 Esc 收起。岛体只经过 `IslandWindow.SetSpotlightOccluded(bool)`：遮挡时先置 `_spotlightOccluded = true` 与 `_shown = false`（否则看门狗会把岛重新顶到卡片之上），再整块淡出后 `Hide()`；恢复时 `UpdateVisibility(force:true)` + 淡入 + 还原内容（临时消息优先）。**卡片内容必须是插件自己的另一棵可视树**（每个窗口一棵树），尺寸由插件声明、宿主夹到工作区 92%，飞入起点/飞回落点用 `MainIslandScreenRect()` + `MainIslandSizeDip()`。覆盖窗的缩放比必须取 `Win32.GetDpiForWindow()` —— 刚搬到目标显示器时 `XamlRoot.RasterizationScale` 还是旧值，会把卡片摆偏。
 - **MorphView mode preferred.** Single view with `AnimateToExpanded`/`AnimateToCompact` for element-level morph. Dual-view (CompactContent + ExpandedContent) is the fallback.
 - **Expanded queue cards are uniform.** The expanded stack is the main island plus up to `MaxExpandedItems - 1` cards. Every element shares one width (`StackWidth` = max expanded width over all live contents) and every card shares one height (`QueueCardHeight` = tallest shown card), so plugins declaring 420×152 and 400×110 still render as one aligned column — the host stretches the card, the plugin view must therefore use star/auto layouts instead of assuming its declared size. Sizes must only flow through `ComputeTotalSize` / `ExpandedMainSize`: `EnsureCanvas` and the `SetWindowRgn` hit shape are derived from them, so a size change that bypasses these drifts the reserved canvas and the click-through shape apart.
 - **Every plugin callback must be guarded.** Plugin code reached from the host (`InitializeAsync`, `ShutdownAsync`, settings-page factories, `OnTap`, timer ticks, settings handlers, **and `IMorphView.AnimateToExpanded/Compact`**) is wrapped by `PluginInstance.InvokeGuarded` / `IslandWindow.AnimateMorphView`. An unguarded plugin exception surfaces as a WinUI stowed exception (0xc000027b) and **kills the process** — the hover-expand crash of 2026-09-20 was exactly this. Add a guard at any new call site.

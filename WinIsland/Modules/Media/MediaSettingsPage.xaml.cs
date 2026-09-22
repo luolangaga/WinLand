@@ -19,6 +19,7 @@ public sealed partial class MediaSettingsPage : UserControl
 
         EnableToggle.IsOn = _settings.Get("enabled", true);
         GlowToggle.IsOn = _settings.Get("glow", true);
+        LyricsToggle.IsOn = _settings.Get("lyrics", true);
         PrioritySlider.Value = _settings.Get("priority", 100);
         StatusText.Text = _plugin.StatusText;
         _loading = false;
@@ -34,6 +35,12 @@ public sealed partial class MediaSettingsPage : UserControl
     {
         if (_loading) return;
         _settings.Set("glow", GlowToggle.IsOn);
+    }
+
+    private void LyricsToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _settings.Set("lyrics", LyricsToggle.IsOn);
     }
 
     private void PrioritySlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)

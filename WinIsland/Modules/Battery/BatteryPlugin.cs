@@ -8,9 +8,11 @@ namespace WinIsland.Modules.Battery;
 public sealed class BatteryPlugin : IslandPluginBase
 {
     private BatteryViewModel _vm = null!;
+    private BatterySpotlightView? _spotlightView;
     private IslandLiveContent _content = null!;
     private bool _enabled;
     private bool _wasPlugged;
+    private bool _spotlightOpen;
     private WinBattery? _battery;
 
     public string StatusText { get; private set; } = "等待电池状态...";
@@ -68,6 +70,7 @@ public sealed class BatteryPlugin : IslandPluginBase
             _battery = null;
         }
 
+        _spotlightOpen = false;
         SetContent(null);
         return Task.CompletedTask;
     }
@@ -82,8 +85,29 @@ public sealed class BatteryPlugin : IslandPluginBase
         OwnerAccent = Windows.UI.Color.FromArgb(255, 108, 203, 95),
         MorphView = new BatteryIslandView(_vm),
         CompactSize = new Windows.Foundation.Size(230, 40),
-        ExpandedSize = new Windows.Foundation.Size(420, 150),
+        ExpandedSize = new Windows.Foundation.Size(420, 174),
+        OnTap = OpenSpotlight,
     };
+
+    /// <summary>点击岛体 = 展开超级大卡片（大进度环 + 容量/健康/循环等高级信息）。</summary>
+    private void OpenSpotlight()
+    {
+        _spotlightView ??= new BatterySpotlightView(_vm);
+        _spotlightOpen = true;
+        Context.Island.OpenSpotlight(new IslandSpotlight
+        {
+            Content = _spotlightView,
+            Size = new Windows.Foundation.Size(700, 470),
+            OnClosed = () => _spotlightOpen = false,
+        });
+    }
+
+    private void CloseSpotlight()
+    {
+        if (!_spotlightOpen) return;
+        _spotlightOpen = false;
+        Context.Island.CloseSpotlight();
+    }
 
     private void SetLive(bool show) => SetContent(show ? _content : null);
 
@@ -150,6 +174,9 @@ public sealed class BatteryPlugin : IslandPluginBase
             }
 
             _wasPlugged = isPlugged;
+
+            // 拔掉充电器后大卡片没有意义了，主动收起（岛体本身也会跟着隐藏）
+            if (!isPlugged) CloseSpotlight();
 
             SetLive(_enabled && isPlugged);
         }

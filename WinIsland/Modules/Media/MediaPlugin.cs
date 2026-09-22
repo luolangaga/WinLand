@@ -16,9 +16,12 @@ public sealed class MediaPlugin : IslandPluginBase
 
     private MediaViewModel _vm = null!;
     private MediaIslandView _islandView = null!;
+    private MediaSpotlightView? _spotlightView;
+    private LyricsService? _lyrics;
     private AudioLevelMonitor? _levelMonitor;
     private IslandLiveContent _content = null!;
     private bool _enabled;
+    private bool _spotlightOpen;
     private int _priority = DefaultPriority;
     private int _refreshVersion;
     private string? _thumbTrackKey;
@@ -39,9 +42,12 @@ public sealed class MediaPlugin : IslandPluginBase
             SwitchToNextSession = SwitchToNextSession,
             SwitchToPrevSession = SwitchToPrevSession,
             RefreshTimeline = RefreshTimeline,
+            SeekTo = SeekTo,
             GlowEnabled = Settings.Get("glow", true),
+            LyricsEnabled = Settings.Get("lyrics", true),
         };
 
+        _lyrics = new LyricsService(Log, PluginDirectory);
         _levelMonitor = new AudioLevelMonitor();
         _islandView = new MediaIslandView(_vm, _levelMonitor);
         _content = BuildContent();
@@ -59,6 +65,7 @@ public sealed class MediaPlugin : IslandPluginBase
             _vm.GlowEnabled = Settings.Get("glow", true);
             UpdateLevelMonitor();
         });
+        Context.OnSettingsChanged("lyrics", () => _vm.LyricsEnabled = Settings.Get("lyrics", true));
         Context.OnSettingsChanged("priority", () =>
         {
             _priority = Settings.Get("priority", DefaultPriority);
@@ -95,6 +102,7 @@ public sealed class MediaPlugin : IslandPluginBase
         _levelMonitor?.Stop();
         _levelMonitor?.Dispose();
         _levelMonitor = null;
+        _spotlightOpen = false;
         SetContent(null);
         return Task.CompletedTask;
     }
@@ -108,8 +116,48 @@ public sealed class MediaPlugin : IslandPluginBase
         MorphView = _islandView,
         CompactSize = new Windows.Foundation.Size(250, 40),
         ExpandedSize = new Windows.Foundation.Size(420, 148),
-        OnTap = ActivateSourceApp,
+        OnTap = OpenSpotlight,
     };
+
+    /// <summary>点击岛体 = 展开超级大卡片（歌词流 / 大封面 / 可拖动进度）。</summary>
+    private void OpenSpotlight()
+    {
+        if (_session == null || string.IsNullOrWhiteSpace(_vm.Title)) return;
+
+        _spotlightView ??= new MediaSpotlightView(_vm, _lyrics, _levelMonitor);
+        _spotlightOpen = true;
+        Context.Island.OpenSpotlight(new IslandSpotlight
+        {
+            Content = _spotlightView,
+            Size = new Windows.Foundation.Size(760, 470),
+            OnClosed = () =>
+            {
+                _spotlightOpen = false;
+                _spotlightView?.OnHostClosed();
+            },
+        });
+    }
+
+    private void CloseSpotlight()
+    {
+        if (!_spotlightOpen) return;
+        _spotlightOpen = false;
+        Context.Island.CloseSpotlight();
+    }
+
+    private void SeekTo(TimeSpan position)
+    {
+        var session = _session;
+        if (session == null) return;
+
+        try
+        {
+            _ = session.TryChangePlaybackPositionAsync(position.Ticks);
+        }
+        catch
+        {
+        }
+    }
 
     private void SetLive(bool show) => SetContent(show ? _content : null);
 
@@ -277,6 +325,7 @@ public sealed class MediaPlugin : IslandPluginBase
         {
             StatusText = _enabled ? "当前没有活动的媒体会话" : "模块已停用";
             _levelMonitor?.Stop();
+            CloseSpotlight();
             SetLive(false);
             return;
         }
@@ -290,6 +339,7 @@ public sealed class MediaPlugin : IslandPluginBase
             {
                 StatusText = "当前没有活动的媒体会话";
                 _levelMonitor?.Stop();
+                CloseSpotlight();
                 SetLive(false);
                 return;
             }
@@ -299,6 +349,7 @@ public sealed class MediaPlugin : IslandPluginBase
 
             _vm.Title = string.IsNullOrWhiteSpace(props.Title) ? "未知曲目" : props.Title;
             _vm.Artist = string.IsNullOrWhiteSpace(props.Artist) ? session.SourceAppUserModelId : props.Artist;
+            _vm.AlbumTitle = props.AlbumTitle ?? "";
             _vm.IsPlaying = status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
             UpdateLevelMonitor();
             StatusText = $"{(_vm.IsPlaying ? "正在播放" : "已暂停")}：{_vm.Title} - {_vm.Artist}（来自 {session.SourceAppUserModelId}）";
@@ -322,6 +373,7 @@ public sealed class MediaPlugin : IslandPluginBase
         }
         catch
         {
+            CloseSpotlight();
             SetLive(false);
         }
     }
@@ -347,34 +399,6 @@ public sealed class MediaPlugin : IslandPluginBase
         catch
         {
             if (version == _refreshVersion) _vm.Thumbnail = null;
-        }
-    }
-
-    private void ActivateSourceApp()
-    {
-        var appId = _session?.SourceAppUserModelId;
-        if (string.IsNullOrEmpty(appId)) return;
-        try
-        {
-            Win32.ActivateApp(appId);
-        }
-        catch
-        {
-            try
-            {
-                var exePart = appId.Contains('!') ? appId.Split('!')[0] : appId;
-                if (exePart.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = exePart,
-                        UseShellExecute = true,
-                    });
-                }
-            }
-            catch
-            {
-            }
         }
     }
 

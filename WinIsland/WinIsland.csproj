@@ -37,6 +37,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2526" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
+    <!-- 电池高级信息（设计容量 / 循环次数 / 电压）走 root\WMI，只有经典 WMI API 拿得到 -->
+    <PackageReference Include="System.Management" Version="10.0.0" />
   </ItemGroup>
 
   <ItemGroup>

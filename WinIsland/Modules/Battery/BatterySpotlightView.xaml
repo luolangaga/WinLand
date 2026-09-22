@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="WinIsland.Modules.Battery.BatterySpotlightView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <!-- 电池超级展开卡：左侧大进度环 + 右侧高级信息（容量/健康/循环/电压/预计时间）。
+         数值都在代码里填，读不到的项显示 "—"。 -->
+    <Grid Padding="28,26,28,22" ColumnSpacing="32">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="236" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel
+            Grid.Column="0"
+            HorizontalAlignment="Center"
+            Spacing="16"
+            VerticalAlignment="Center">
+            <Grid Width="228" Height="228">
+                <Ellipse
+                    Width="212"
+                    Height="212"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    IsHitTestVisible="False"
+                    Opacity="0.5">
+                    <Ellipse.Fill>
+                        <RadialGradientBrush>
+                            <GradientStop Offset="0" Color="#596CCB5F" />
+                            <GradientStop Offset="0.6" Color="#1F6CCB5F" />
+                            <GradientStop Offset="1" Color="#006CCB5F" />
+                        </RadialGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
+                <Ellipse
+                    Width="202"
+                    Height="202"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Stroke="#26FFFFFF"
+                    StrokeThickness="15" />
+                <Ellipse
+                    x:Name="FgRing"
+                    Width="202"
+                    Height="202"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    RenderTransformOrigin="0.5,0.5"
+                    Stroke="#FF6CCB5F"
+                    StrokeDashArray="100,100"
+                    StrokeDashOffset="100"
+                    StrokeEndLineCap="Round"
+                    StrokeStartLineCap="Round"
+                    StrokeThickness="15">
+                    <Ellipse.RenderTransform>
+                        <RotateTransform Angle="-90" />
+                    </Ellipse.RenderTransform>
+                </Ellipse>
+                <StackPanel
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center">
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        FontSize="50"
+                        FontWeight="SemiBold"
+                        Foreground="White"
+                        Text="{x:Bind ViewModel.PercentText, Mode=OneWay}" />
+                </StackPanel>
+            </Grid>
+
+            <!-- 预计时间放在环下面当主角：充电时说"还有多久充满"，放电时说"还能用多久" -->
+            <TextBlock
+                x:Name="EstimateText"
+                MaxWidth="240"
+                HorizontalAlignment="Center"
+                FontSize="14"
+                FontWeight="SemiBold"
+                Foreground="#CCFFFFFF"
+                Text="—"
+                TextAlignment="Center"
+                TextWrapping="Wrap" />
+
+            <Border
+                x:Name="StatusPill"
+                Padding="14,6,14,6"
+                HorizontalAlignment="Center"
+                Background="#266CCB5F"
+                CornerRadius="12">
+                <TextBlock
+                    x:Name="PillText"
+                    FontSize="12"
+                    Foreground="#FF6CCB5F"
+                    Text="正在充电" />
+            </Border>
+        </StackPanel>
+
+        <StackPanel
+            x:Name="InfoPanel"
+            Grid.Column="1"
+            Opacity="0"
+            VerticalAlignment="Center">
+            <Grid Height="38">
+                <TextBlock
+                    x:Name="ValuePowerLabel"
+                    VerticalAlignment="Center"
+                    FontSize="13"
+                    Foreground="#80FFFFFF"
+                    Text="充电功率" />
+                <TextBlock
+                    x:Name="ValuePowerText"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    FontSize="15"
+                    FontWeight="SemiBold"
+                    Foreground="#FF6CCB5F"
+                    Text="—" />
+            </Grid>
+            <Border Height="1" Background="#14FFFFFF" />
+            <Grid Height="38">
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="13"
+                    Foreground="#80FFFFFF"
+                    Text="剩余容量" />
+                <TextBlock
+                    x:Name="ValueRemainingText"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    FontSize="15"
+                    FontWeight="SemiBold"
+                    Foreground="White"
+                    Text="—" />
+            </Grid>
+            <Border Height="1" Background="#14FFFFFF" />
+            <Grid Height="38">
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="13"
+                    Foreground="#80FFFFFF"
+                    Text="满充容量" />
+                <TextBlock
+                    x:Name="ValueFullText"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    FontSize="15"
+                    FontWeight="SemiBold"
+                    Foreground="White"
+                    Text="—" />
+            </Grid>
+            <Border Height="1" Background="#14FFFFFF" />
+            <Grid Height="38">
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="13"
+                    Foreground="#80FFFFFF"
+                    Text="设计容量" />
+                <TextBlock
+                    x:Name="ValueDesignText"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    FontSize="15"
+                    FontWeight="SemiBold"
+                    Foreground="White"
+                    Text="—" />
+            </Grid>
+            <Border Height="1" Background="#14FFFFFF" />
+            <Grid Height="38">
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="13"
+                    Foreground="#80FFFFFF"
+                    Text="电池健康" />
+                <TextBlock
+                    x:Name="ValueHealthText"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    FontSize="15"
+                    FontWeight="SemiBold"
+                    Foreground="White"
+                    Text="—" />
+            </Grid>
+            <Border Height="1" Background="#14FFFFFF" />
+            <Grid Height="38">
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="13"
+                    Foreground="#80FFFFFF"
+                    Text="循环次数" />
+                <TextBlock
+                    x:Name="ValueCycleText"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    FontSize="15"
+                    FontWeight="SemiBold"
+                    Foreground="White"
+                    Text="—" />
+            </Grid>
+            <Border Height="1" Background="#14FFFFFF" />
+            <Grid Height="38">
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="13"
+                    Foreground="#80FFFFFF"
+                    Text="电池电压" />
+                <TextBlock
+                    x:Name="ValueVoltageText"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    FontSize="15"
+                    FontWeight="SemiBold"
+                    Foreground="White"
+                    Text="—" />
+            </Grid>
+            <Border Height="1" Background="#14FFFFFF" />
+            <Grid Height="38">
+                <TextBlock
+                    x:Name="ValueTimeLabel"
+                    VerticalAlignment="Center"
+                    FontSize="13"
+                    Foreground="#80FFFFFF"
+                    Text="预计充满" />
+                <TextBlock
+                    x:Name="ValueTimeText"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    FontSize="15"
+                    FontWeight="SemiBold"
+                    Foreground="White"
+                    Text="—" />
+            </Grid>
+        </StackPanel>
+    </Grid>
+</UserControl>
