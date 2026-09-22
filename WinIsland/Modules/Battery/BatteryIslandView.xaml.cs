@@ -11,11 +11,6 @@ namespace WinIsland.Modules.Battery;
 
 public sealed partial class BatteryIslandView : UserControl, IMorphView
 {
-    /// <summary>展开面板的目标高度（进度条 + 两行高级信息）。</summary>
-    private const double ExpandedPanelHeight = 88;
-    /// <summary>展开期间每隔这么久重新采一次电池高级信息（WMI 部分内部有 8 秒缓存）。</summary>
-    private static readonly TimeSpan DetailInterval = TimeSpan.FromSeconds(1);
-
     private Storyboard? _morphStoryboard;
     private bool _isExpanded;
     private bool _entrancePlayed;
@@ -28,8 +23,6 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
     private readonly List<Polyline> _arcs = new();
     private readonly Random _rng = new();
     private int _arcTick;
-
-    private DispatcherQueueTimer? _detailTimer;
 
     internal BatteryViewModel ViewModel { get; }
 
@@ -56,17 +49,12 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
         _arcTimer.Interval = TimeSpan.FromMilliseconds(60);
         _arcTimer.Tick += (_, _) => OnArcTick();
 
-        _detailTimer = DispatcherQueue.CreateTimer();
-        _detailTimer.Interval = DetailInterval;
-        _detailTimer.Tick += (_, _) => UpdateDetails();
-
         BuildArcs();
 
         UpdateProgressArc();
         UpdateProgressBar();
         UpdateArcColor();
         UpdateCenterIcon();
-        UpdateDetails();
 
         if (!_entrancePlayed)
         {
@@ -79,57 +67,7 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
     {
         _glowTimer?.Stop();
         _arcTimer?.Stop();
-        _detailTimer?.Stop();
         _morphStoryboard?.Stop();
-    }
-
-    /// <summary>
-    /// 展开面板里的高级信息：满充容量 / 健康度 / 循环次数 / 预计时间。
-    /// 数据源与聚光卡一致（BatteryProbe：WinRT 报告 + root\WMI），拿不到的项显示 "—"。
-    /// </summary>
-    private void UpdateDetails()
-    {
-        var info = BatteryProbe.Read();
-        int percent = Math.Clamp(ViewModel.Percent, 0, 100);
-
-        DetailStatus.Text = info.Discharging
-            ? "电池供电中"
-            : percent >= 100 ? "已充满" : "充电中";
-
-        DetailCapacity.Text = info.FullChargeCapacityMwh is { } full
-            ? BatteryFormat.Energy(full)
-            : "—";
-
-        if (info.HealthPercent is { } health)
-        {
-            DetailHealth.Text = $"{health:F1}%";
-            DetailHealth.Foreground = new SolidColorBrush(
-                health >= 80
-                    ? Windows.UI.Color.FromArgb(0xFF, 0x6C, 0xCB, 0x5F)
-                    : health >= 60
-                        ? Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xA6, 0x23)
-                        : Windows.UI.Color.FromArgb(0xFF, 0xE8, 0x4D, 0x3D));
-        }
-        else
-        {
-            DetailHealth.Text = "—";
-            DetailHealth.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
-        }
-
-        DetailCycles.Text = info.CycleCount is { } cycles ? $"{cycles} 次" : "—";
-
-        if (info.UntilFullTime is { } untilFull)
-        {
-            DetailTime.Text = BatteryFormat.Duration(untilFull);
-        }
-        else if (info.RemainingTime is { } remaining)
-        {
-            DetailTime.Text = BatteryFormat.Duration(remaining);
-        }
-        else
-        {
-            DetailTime.Text = "—";
-        }
     }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -328,8 +266,6 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
         _morphStoryboard?.Stop();
         _isExpanded = true;
         SyncGlow();
-        UpdateDetails();
-        _detailTimer?.Start();
 
         var sb = new Storyboard();
         var easing = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.45 };
@@ -351,7 +287,7 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
             TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3),
             new CubicEase { EasingMode = EasingMode.EaseIn }));
 
-        sb.Children.Add(Anim(ExpandedPanel, "Height", 0, ExpandedPanelHeight, halfDur,
+        sb.Children.Add(Anim(ExpandedPanel, "Height", 0, 65, halfDur,
             new CubicEase { EasingMode = EasingMode.EaseOut },
             beginTime: TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.3)));
         sb.Children.Add(Anim(ExpandedPanel, "Opacity", 0, 1, halfDur,
@@ -385,7 +321,6 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
         _morphStoryboard?.Stop();
         _isExpanded = false;
         _glowTimer?.Stop();
-        _detailTimer?.Stop();
 
         var sb = new Storyboard();
         var easing = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.45 };
@@ -409,7 +344,7 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
             PowerText.FontSize > 0 ? PowerText.FontSize : 13, 11, duration, easing));
 
         sb.Children.Add(Anim(ExpandedPanel, "Height",
-            ExpandedPanel.ActualHeight > 0 ? ExpandedPanel.ActualHeight : ExpandedPanelHeight, 0, thirdDur,
+            ExpandedPanel.ActualHeight > 0 ? ExpandedPanel.ActualHeight : 65, 0, thirdDur,
             new CubicEase { EasingMode = EasingMode.EaseIn }));
         sb.Children.Add(Anim(ExpandedPanel, "Opacity",
             ExpandedPanel.Opacity > 0 ? ExpandedPanel.Opacity : 1, 0, thirdDur,

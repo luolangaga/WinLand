@@ -85,7 +85,7 @@ public sealed class BatteryPlugin : IslandPluginBase
         OwnerAccent = Windows.UI.Color.FromArgb(255, 108, 203, 95),
         MorphView = new BatteryIslandView(_vm),
         CompactSize = new Windows.Foundation.Size(230, 40),
-        ExpandedSize = new Windows.Foundation.Size(420, 174),
+        ExpandedSize = new Windows.Foundation.Size(420, 150),
         OnTap = OpenSpotlight,
     };
 

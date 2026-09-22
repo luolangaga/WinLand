@@ -16,55 +16,27 @@
             Text="灵动岛外观与行为" />
 
         <Border Style="{StaticResource SettingsCardStyle}">
-            <Grid ColumnSpacing="16">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Spacing="2" VerticalAlignment="Center">
-                    <TextBlock Text="外观风格" />
-                    <TextBlock
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="Apple 灵动岛：纯黑胶囊；Windows Fluent：系统材质与更小的圆角"
-                        TextWrapping="Wrap" />
-                </StackPanel>
-                <ComboBox
-                    x:Name="StyleCombo"
-                    Grid.Column="1"
-                    Width="200"
-                    VerticalAlignment="Center"
-                    SelectionChanged="StyleCombo_SelectionChanged">
-                    <ComboBoxItem Content="Apple 灵动岛" />
-                    <ComboBoxItem Content="Windows Fluent" />
-                </ComboBox>
-            </Grid>
+            <StackPanel Spacing="4">
+                <TextBlock Text="外观风格" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="Apple 灵动岛：纯黑胶囊；Windows Fluent：系统材质与更小的圆角"
+                    TextWrapping="Wrap" />
+                <Grid x:Name="StyleCards" Margin="0,8,0,0" />
+            </StackPanel>
         </Border>
 
         <Border Style="{StaticResource SettingsCardStyle}">
-            <Grid ColumnSpacing="16">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Spacing="2" VerticalAlignment="Center">
-                    <TextBlock Text="Fluent 材质" />
-                    <TextBlock
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="仅 Windows Fluent 风格生效；不支持的系统自动回退纯色"
-                        TextWrapping="Wrap" />
-                </StackPanel>
-                <ComboBox
-                    x:Name="MaterialCombo"
-                    Grid.Column="1"
-                    Width="200"
-                    VerticalAlignment="Center"
-                    SelectionChanged="MaterialCombo_SelectionChanged">
-                    <ComboBoxItem Content="Desktop Acrylic（磨砂玻璃）" />
-                    <ComboBoxItem Content="Mica（壁纸着色）" />
-                </ComboBox>
-            </Grid>
+            <StackPanel Spacing="4">
+                <TextBlock Text="Fluent 材质" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="仅 Windows Fluent 风格生效；不支持的系统自动回退纯色"
+                    TextWrapping="Wrap" />
+                <Grid x:Name="MaterialCards" Margin="0,8,0,0" />
+            </StackPanel>
         </Border>
 
         <Border Style="{StaticResource SettingsCardStyle}">
@@ -118,41 +90,27 @@
         </Border>
 
         <Border Style="{StaticResource SettingsCardStyle}">
-            <Grid ColumnSpacing="16">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Spacing="2" VerticalAlignment="Center">
-                    <TextBlock Text="位置" />
-                    <TextBlock
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="贴屏幕顶部，或嵌进底部任务栏（展开向上生长，队列排到岛体上方）"
-                        TextWrapping="Wrap" />
-                </StackPanel>
-                <StackPanel
-                    Grid.Column="1"
-                    Orientation="Horizontal"
-                    Spacing="8"
-                    VerticalAlignment="Center">
-                    <ComboBox
-                        x:Name="PositionCombo"
-                        Width="170"
-                        SelectionChanged="PositionCombo_SelectionChanged">
-                        <ComboBoxItem Content="屏幕顶部" />
-                        <ComboBoxItem Content="屏幕底部（嵌入任务栏）" />
-                    </ComboBox>
-                    <ComboBox
-                        x:Name="HorizontalCombo"
-                        Width="110"
-                        SelectionChanged="HorizontalCombo_SelectionChanged">
-                        <ComboBoxItem Content="居中" />
-                        <ComboBoxItem Content="靠左" />
-                        <ComboBoxItem Content="靠右" />
-                    </ComboBox>
-                </StackPanel>
-            </Grid>
+            <StackPanel Spacing="4">
+                <TextBlock Text="位置" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="贴屏幕顶部，或嵌进底部任务栏（展开向上生长，队列排到岛体上方）"
+                    TextWrapping="Wrap" />
+                <Grid x:Name="PositionCards" Margin="0,8,0,0" />
+            </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <StackPanel Spacing="4">
+                <TextBlock Text="水平对齐" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="岛在屏幕上横向贴哪一边；嵌入任务栏时会自动落在任务栏的空闲段里"
+                    TextWrapping="Wrap" />
+                <Grid x:Name="HorizontalCards" Margin="0,8,0,0" />
+            </StackPanel>
         </Border>
 
         <Border Style="{StaticResource SettingsCardStyle}">
@@ -205,6 +163,46 @@
                     StepFrequency="2"
                     VerticalAlignment="Center"
                     ValueChanged="HorizontalOffsetSlider_ValueChanged" />
+            </Grid>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <StackPanel Spacing="4">
+                <TextBlock Text="开机自启动" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="普通权限：登录后直接启动；管理员权限：创建「最高权限运行」的登录计划任务（设置时会弹一次 UAC 确认）"
+                    TextWrapping="Wrap" />
+                <TextBlock
+                    x:Name="AutoStartStatus"
+                    Margin="0,4,0,0"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    TextWrapping="Wrap" />
+                <Grid x:Name="AutoStartCards" Margin="0,8,0,0" />
+            </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="新手引导" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="重新查看位置、外观、自启、推荐插件与系统托盘的介绍"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <Button
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    Click="RunOnboarding_Click"
+                    Content="重新运行新手引导" />
             </Grid>
         </Border>
     </StackPanel>

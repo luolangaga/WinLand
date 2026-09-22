@@ -694,6 +694,30 @@ public sealed partial class IslandWindow : Window
             surface.ApplyStyle(_style, _materialApplied);
             surface.SetRadius(IslandStyle.ResolveQueueRadius(_style, cardHeight));
             surface.SetContent(inner);
+
+            // 队列卡片也是"那个插件的岛"：点它要触发它自己的 OnTap（通常就是打开它的聚光卡）。
+            // 以前只有主岛接了点击，导致排在后面的插件永远打不开自己的超大卡。
+            var tapped = content.OnTap;
+            if (tapped != null)
+            {
+                string owner = item.Owner;
+                surface.Border.Tag = owner;      // 便于排错时看清是哪张卡
+                surface.Border.Tapped += (_, e) =>
+                {
+                    // 卡片里的按钮/滑块自己处理点击，不算"点了卡片"
+                    if (IsInteractiveSource(e.OriginalSource)) return;
+                    e.Handled = true;
+                    try
+                    {
+                        tapped();
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Error($"插件「{owner}」的点击回调抛异常（已忽略）", ex);
+                    }
+                };
+            }
+
             QueuePanel.Children.Add(surface.Border);
             _queueSurfaces.Add(surface);
 

@@ -6,6 +6,7 @@ using WinIsland.Island;
 using WinIsland.Modules.Battery;
 using WinIsland.Modules.Media;
 using WinIsland.Modules.Messaging;
+using WinIsland.Onboarding;
 using WinIsland.Settings;
 
 namespace WinIsland;
@@ -20,6 +21,7 @@ public partial class App : Application
     private readonly PluginLogService _logs;
     private TrayIcon? _tray;
     internal SettingsWindow? _settingsWindow;
+    internal OnboardingWindow? _onboardingWindow;
     private bool _exiting;
 
     public App()
@@ -80,7 +82,7 @@ public partial class App : Application
             await _plugins.InitializeAsync();
 
             _service.AddSettingsPage(new SettingsPageDescriptor(
-                "general", "通用", "\uE713", () => new GeneralSettingsPage(_settings), 0));
+                "general", "通用", "\uE713", () => new GeneralSettingsPage(_settings, OpenOnboardingWindow), 0));
             _service.AddSettingsPage(new SettingsPageDescriptor(
                 "marketplace", "插件市场", "\uE719", () => new MarketplacePage(_marketplace, _plugins), 900));
             _service.AddSettingsPage(new SettingsPageDescriptor(
@@ -95,6 +97,11 @@ public partial class App : Application
             });
 
             _logs.Host.Info($"WinIsland 已启动（宿主 SDK {IslandSdk.HostVersion}，插件目录 {_plugins.PluginsDirectory}）。");
+
+            if (!_settings.Get(OnboardingWindow.DoneSettingKey, false))
+            {
+                OpenOnboardingWindow();
+            }
         }
         catch (Exception ex)
         {
@@ -150,6 +157,24 @@ public partial class App : Application
         }
     }
 
+    private void OpenOnboardingWindow()
+    {
+        try
+        {
+            if (_onboardingWindow == null)
+            {
+                _onboardingWindow = new OnboardingWindow(_settings, _marketplace, _plugins, () => OpenSettingsWindow(null));
+                _onboardingWindow.Closed += (_, _) => _onboardingWindow = null;
+            }
+            _onboardingWindow.Activate();
+        }
+        catch (Exception ex)
+        {
+            _onboardingWindow = null;
+            _logs.Host.Error("打开新手引导窗口失败", ex);
+        }
+    }
+
     private async void ExitApp()
     {
         if (_exiting) return;
@@ -166,6 +191,7 @@ public partial class App : Application
             _plugins?.Logs.Host.Error("退出清理时发生异常", ex);
         }
 
+        _onboardingWindow?.Close();
         _settingsWindow?.Close();
         _island.Close();
         Environment.Exit(0);
