@@ -2,6 +2,7 @@
 using WinIsland.Core;
 using WinIsland.Core.Marketplace;
 using WinIsland.Core.Plugins;
+using WinIsland.Core.Update;
 using WinIsland.Island;
 using WinIsland.Modules.Battery;
 using WinIsland.Modules.Media;
@@ -18,6 +19,7 @@ public partial class App : Application
     private IslandService _service = null!;
     private PluginHost _plugins = null!;
     private MarketplaceService _marketplace = null!;
+    private UpdateService _updates = null!;
     private readonly PluginLogService _logs;
     private TrayIcon? _tray;
     internal SettingsWindow? _settingsWindow;
@@ -59,6 +61,7 @@ public partial class App : Application
 
             _plugins = new PluginHost(_service, _settings, _island.DispatcherQueue, _logs);
             _marketplace = new MarketplaceService(_settings, _logs.Host);
+            _updates = new UpdateService(_settings, _logs.Host);
 
             _island.ShowIsland();
 
@@ -87,6 +90,8 @@ public partial class App : Application
                 "marketplace", "插件市场", "\uE719", () => new MarketplacePage(_marketplace, _plugins), 900));
             _service.AddSettingsPage(new SettingsPageDescriptor(
                 "plugins", "插件管理", "\uE712", () => new PluginManagerPage(_plugins, _settings), 1000));
+            _service.AddSettingsPage(new SettingsPageDescriptor(
+                "about", "关于", "\uE946", () => new AboutSettingsPage(_updates), 1100));
 
             _service.SendMessage(new IslandMessage
             {
@@ -96,7 +101,10 @@ public partial class App : Application
                 Duration = TimeSpan.FromSeconds(4),
             });
 
-            _logs.Host.Info($"WinIsland 已启动（宿主 SDK {IslandSdk.HostVersion}，插件目录 {_plugins.PluginsDirectory}）。");
+            _logs.Host.Info(
+                $"WinIsland 已启动（宿主 SDK {IslandSdk.HostVersion}，程序版本 {_updates.CurrentVersionText}，插件目录 {_plugins.PluginsDirectory}）。");
+
+            _ = AutoCheckUpdatesAsync();
 
             if (!_settings.Get(OnboardingWindow.DoneSettingKey, false))
             {
@@ -106,6 +114,35 @@ public partial class App : Application
         catch (Exception ex)
         {
             _logs.Host.Error("应用启动失败", ex);
+        }
+    }
+
+    /// <summary>
+    /// 启动后的后台更新检查：只提醒不安装。延迟一会儿再跑，避免和启动抢资源；
+    /// 自动检查被关掉、或距上次检查不到 6 小时就直接跳过。
+    /// </summary>
+    private async Task AutoCheckUpdatesAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(15));
+            if (!_updates.ShouldAutoCheck()) return;
+
+            var result = await _updates.CheckAsync(CancellationToken.None);
+            if (result.Status != UpdateStatus.UpdateAvailable || result.Release is not { } release) return;
+            if (_updates.IsSkipped(release)) return;
+
+            _service.SendMessage(new IslandMessage
+            {
+                Title = $"发现新版本 {release.Tag}",
+                Text = "设置 → 关于 可查看更新说明",
+                Glyph = "\uE72C",
+                Duration = TimeSpan.FromSeconds(6),
+            });
+        }
+        catch (Exception ex)
+        {
+            _logs.Host.Warn($"自动检查更新失败：{ex.Message}");
         }
     }
 
@@ -130,11 +167,27 @@ public partial class App : Application
         return new[]
         {
             new TrayMenuItem("打开设置", () => OpenSettingsWindow(null)),
+            BuildUpdateMenuItem(),
             TrayMenuItem.Separator,
             new TrayMenuItem("显示灵动岛", () => _settings.Set("island.visible", !visible), visible),
             TrayMenuItem.Separator,
             new TrayMenuItem("退出", ExitApp),
         };
+    }
+
+    /// <summary>托盘里的更新入口：已经发现新版本时直接把版本号写在菜单上。</summary>
+    private TrayMenuItem BuildUpdateMenuItem()
+    {
+        if (_updates.Available is { } release && !_updates.IsSkipped(release))
+        {
+            return new TrayMenuItem($"发现新版本 {release.Tag}", () => OpenSettingsWindow("about"));
+        }
+
+        return new TrayMenuItem("检查更新…", () =>
+        {
+            OpenSettingsWindow("about");
+            _ = _updates.CheckAsync(CancellationToken.None);
+        });
     }
 
     private void OpenSettingsWindow(string? pageId)

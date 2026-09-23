@@ -141,3 +141,14 @@ jobs:
             --title "WinIsland ${{ needs.prepare.outputs.version }}" \
             --generate-notes \
             --verify-tag
+
+  # 客户端的更新检查是「GitCode 优先、失败回退 GitHub」：把安装包同步过去，那条优先路径才真的走得通。
+  # 同步逻辑在 sync-to-gitcode.yml（与 tubatool 同款：api.atomgit.com + access_token + 官方代理 IP），
+  # 没配 GITCODE_ACCESS_TOKEN 时它会自己跳过；需要补传时也可以在 Actions 里单独手动重跑。
+  sync-gitcode:
+    name: 同步安装包到 GitCode
+    needs: release
+    uses: ./.github/workflows/sync-to-gitcode.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit

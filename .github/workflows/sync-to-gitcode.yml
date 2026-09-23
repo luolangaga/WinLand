@@ -1,0 +1,257 @@
+name: 同步安装包到 GitCode
+
+# 客户端的更新检查是「GitCode 优先、失败回退 GitHub」，GitCode 上有安装包这条路才真的走得通。
+# 本工作流既由 release.yml 在 GitHub 发布之后自动调用，也可以在 Actions 里手动重跑补传某个 tag。
+# 做法对齐 luolangaga/tubatool 的 sync-to-gitcode.yml：api.atomgit.com + access_token + 官方代理 IP + upload_url 预签名上传。
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要同步的 Release tag（例如 v1.2.3）'
+        required: true
+        type: string
+      prerelease:
+        description: '在 GitCode 上标为预发布'
+        required: false
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      tag:
+        description: '要同步的 Release tag（例如 v1.2.3）'
+        required: true
+        type: string
+      prerelease:
+        description: '在 GitCode 上标为预发布'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  GITCODE_OWNER: luolangaga
+  GITCODE_REPO: WinLand
+  GITCODE_ACCESS_TOKEN: ${{ secrets.GITCODE_ACCESS_TOKEN }}
+  API_BASE: https://api.atomgit.com/api/v5/repos/luolangaga/WinLand
+
+jobs:
+  sync-to-gitcode:
+    name: 同步 ${{ inputs.tag }} 到 GitCode
+    runs-on: ubuntu-latest
+    steps:
+      # 没配令牌就安静跳过：GitHub 那边照常发布，客户端会自动回退到 GitHub
+      - name: 检查令牌
+        id: token
+        run: |
+          if [ -z "${GITCODE_ACCESS_TOKEN}" ]; then
+            echo "::warning::仓库没有配置 GITCODE_ACCESS_TOKEN，跳过 GitCode 同步"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 海外 runner 直连下载/上传都慢，走 GitCode 官方代理 IP（与 tubatool 一致）
+      - name: 优化到 GitCode 的网络
+        if: steps.token.outputs.skip != 'true'
+        run: |
+          set -e
+          PROXY_IP=159.138.147.37
+          for host in api.atomgit.com file.atomgit.com file.gitcode.com; do
+            if grep -qE "^[0-9.]+[[:space:]]+$host([[:space:]]|$)" /etc/hosts; then
+              echo "已有 hosts 记录：$host"
+            else
+              echo "$PROXY_IP $host" | sudo tee -a /etc/hosts >/dev/null
+            fi
+          done
+          getent hosts api.atomgit.com
+
+      - name: 解析 GitHub Release
+        id: release
+        if: steps.token.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          RELEASE_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq .id 2>/dev/null || true)
+          if [ -z "$RELEASE_ID" ]; then
+            echo "tag 接口没找到，改为遍历 Release 列表…"
+            RELEASE_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq ".[] | select(.tag_name == \"${TAG}\") | .id" 2>/dev/null | head -1 || true)
+          fi
+          if [ -z "$RELEASE_ID" ]; then
+            echo "::error::找不到 tag ${TAG} 对应的 GitHub Release（先把 GitHub 的发布跑完再同步）"
+            exit 1
+          fi
+
+          PRERELEASE=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq .prerelease)
+          if [ "${{ inputs.prerelease }}" = "true" ] || [ "$PRERELEASE" = "true" ]; then
+            STATUS=pre
+          else
+            STATUS=latest
+          fi
+
+          echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
+          echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
+          echo "Release ${TAG}：id=${RELEASE_ID}，GitHub prerelease=${PRERELEASE} → GitCode release_status=${STATUS}"
+
+      - name: 下载安装包
+        if: steps.token.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p release_files
+
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${{ steps.release.outputs.release_id }}/assets" \
+            --paginate --jq '.[] | [.name, .url] | @tsv' > assets.tsv
+
+          while IFS=$'\t' read -r name url; do
+            [ -n "$name" ] || continue
+            case "$name" in
+              *.exe) ;;
+              *) echo "跳过非安装包资产：$name"; continue ;;
+            esac
+            curl -sSL --fail -o "release_files/${name}" \
+              -H 'Accept: application/octet-stream' \
+              -H "Authorization: token ${GH_TOKEN}" "$url"
+          done < assets.tsv
+
+          ls -lh release_files
+
+      # 安装包哈希直接写进 GitCode 的发布说明，下载的人可以自己核对
+      - name: 计算 SHA256
+        if: steps.token.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          cd release_files
+          {
+            echo "国内镜像。完整发布说明见 GitHub：https://github.com/${GITHUB_REPOSITORY}/releases/tag/${{ inputs.tag }}"
+            echo
+            echo "## SHA256 校验值"
+            echo
+            echo "| 文件 | SHA256 |"
+            echo "|------|--------|"
+            for f in *.exe; do
+              [ -f "$f" ] || continue
+              echo "| \`$f\` | \`$(sha256sum "$f" | awk '{print $1}')\` |"
+            done
+          } > ../hash_table.md
+          cat ../hash_table.md
+
+      - name: 创建或更新 GitCode Release
+        if: steps.token.outputs.skip != 'true'
+        env:
+          TAG: ${{ inputs.tag }}
+          STATUS: ${{ steps.release.outputs.status }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          api_base = os.environ["API_BASE"]
+          tag = os.environ["TAG"]
+          token = os.environ["GITCODE_ACCESS_TOKEN"]
+
+          with open("hash_table.md", encoding="utf-8") as handle:
+              body = handle.read()
+
+          payload = {
+              "tag_name": tag,
+              "name": f"WinIsland {tag}",
+              "body": body,
+              "target_commitish": "main",
+              "release_status": os.environ["STATUS"],
+          }
+          data = json.dumps(payload).encode("utf-8")
+
+          def send(method, url):
+              request = urllib.request.Request(url, data=data, method=method)
+              request.add_header("Content-Type", "application/json")
+              return urllib.request.urlopen(request)
+
+          try:
+              response = send("POST", f"{api_base}/releases?access_token={token}")
+              print(f"GitCode Release 已创建：{tag}（HTTP {response.status}）")
+          except urllib.error.HTTPError as error:
+              if error.code != 409:
+                  detail = error.read().decode("utf-8", errors="replace")
+                  raise SystemExit(f"::error::创建 GitCode Release 失败（HTTP {error.code}）：{detail}")
+              print("Release 已存在，改为更新…")
+              try:
+                  response = send("PATCH", f"{api_base}/releases/{tag}?access_token={token}")
+                  print(f"GitCode Release 已更新：{tag}（HTTP {response.status}）")
+              except urllib.error.HTTPError as update_error:
+                  detail = update_error.read().decode("utf-8", errors="replace")
+                  print(f"::warning::更新 GitCode Release 失败（HTTP {update_error.code}）：{detail}")
+          PY
+
+      - name: 上传安装包到 GitCode
+        if: steps.token.outputs.skip != 'true'
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import glob
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          api_base = os.environ["API_BASE"]
+          tag = os.environ["TAG"]
+          token = os.environ["GITCODE_ACCESS_TOKEN"]
+          failures = []
+
+          for path in sorted(glob.glob("release_files/*.exe")):
+              name = os.path.basename(path)
+              print(f"上传 {name} …")
+
+              upload_url = ""
+              headers = {}
+              try:
+                  url = f"{api_base}/releases/{tag}/upload_url?access_token={token}&file_name={name}"
+                  with urllib.request.urlopen(url) as response:
+                      info = json.loads(response.read().decode("utf-8"))
+                  upload_url = info.get("url", "")
+                  headers = info.get("headers", {}) or {}
+              except Exception as error:
+                  failures.append(name)
+                  print(f"::warning::取 {name} 的上传地址失败：{error}")
+                  continue
+
+              if not upload_url:
+                  failures.append(name)
+                  print(f"::warning::GitCode 没有返回 {name} 的上传地址")
+                  continue
+
+              with open(path, "rb") as handle:
+                  payload = handle.read()
+
+              request = urllib.request.Request(upload_url, data=payload, method="PUT")
+              for key, value in headers.items():
+                  request.add_header(key, value)
+              if not any(key.lower() == "content-type" for key in request.headers):
+                  request.add_header("Content-Type", "application/octet-stream")
+
+              try:
+                  with urllib.request.urlopen(request) as response:
+                      print(f"  完成（HTTP {response.status}）")
+              except urllib.error.HTTPError as error:
+                  failures.append(name)
+                  print(f"::warning::{name} 上传失败（HTTP {error.code}）")
+              except Exception as error:
+                  failures.append(name)
+                  print(f"::warning::{name} 上传失败：{error}")
+
+          if failures:
+              print(f"::warning::这些文件没能同步到 GitCode：{', '.join(failures)}；可在 Actions 里重跑本工作流补传")
+          else:
+              print(f"GitCode 同步完成：https://gitcode.com/{os.environ['GITCODE_OWNER']}/{os.environ['GITCODE_REPO']}/releases")
+          PY

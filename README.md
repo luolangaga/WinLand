@@ -54,6 +54,7 @@
 * **AI 友好** —— 配套 [`winland-plugin-maker`](https://github.com/luolangaga/WinLandPluginSkills) 技能：用中文说一句需求，
   就能让 AI 从零写出插件、装进你正在用的 WinIsland 实测，并投稿上架市场（全程不用懂编程）
 * **插件市场** —— 整表一次请求、多镜像回退、安装前强制校验 SHA-256
+* **更新提醒** —— 「设置 → 关于」检查新版本：先问 GitCode 国内镜像、失败回退 GitHub，只提醒不擅自安装
 * **开箱即用** —— 内置「正在播放 / 充电监控 / 发送消息」三个插件，它们同时也是最好的示例代码
 * **干净** —— 无边框、真透明、点击穿透（形状级）、每用户安装不需要管理员权限
 
@@ -89,12 +90,15 @@
 ### 安装
 
 到 [Releases](https://github.com/luolangaga/WinLand/releases/latest) 下载 `WinIsland-<版本>-x64-setup.exe`（或 `-arm64-`），双击安装即可。
+国内网络也可以走 [GitCode 镜像](https://gitcode.com/luolangaga/WinLand/releases)。
 
 启动后：
 
 * 胶囊出现在屏幕顶部中央，或嵌进任务栏（由「设置 → 通用 → 位置」决定）
-* **双击托盘图标**打开设置，**右键托盘图标**可以显示/隐藏灵动岛、退出
+* **双击托盘图标**打开设置，**右键托盘图标**可以显示/隐藏灵动岛、检查更新、退出
 * 默认「空闲时隐藏」：没有任何插件在报事时自动收起，有内容再出现
+* 「设置 → 关于」能看到当前版本并手动检查更新：先查 GitCode 国内镜像，失败再回退 GitHub 官方源；
+  发现新版本只在设置页和岛上提醒，**下载与安装由你自己完成**（程序不会静默替换自己）
 
 ### 从源码构建
 
@@ -107,7 +111,10 @@ dotnet run
 
 仓库里没有 `.sln`，直接构建 `WinIsland/WinIsland.csproj` 即可。发布与安装包由
 [`.github/workflows/release.yml`](.github/workflows/release.yml) 在打 `v*` 标签时自动完成
-（x64 / ARM64 各一份自包含产物 + Inno Setup 安装包）。
+（x64 / ARM64 各一份自包含产物 + Inno Setup 安装包）。仓库里配了 `GITCODE_ACCESS_TOKEN` 密钥时，
+安装包会由 [`sync-to-gitcode.yml`](.github/workflows/sync-to-gitcode.yml) **同步到
+[GitCode 的 Release](https://gitcode.com/luolangaga/WinLand/releases)**（客户端检查更新的首选源）；
+没配就跳过，客户端会自动回退到 GitHub。需要补传某个 tag 时，在 Actions 里手动跑一次这个工作流即可。
 
 ---
 
@@ -280,10 +287,11 @@ WinIsland/                主程序（WinUI 3 / .NET 10 / Windows App SDK）
   Core/
     Plugins/              插件引擎：发现 / 安装 / 启用 / 热重载 / 卸载，可回收 ALC 与作用域回收
     Marketplace/          插件市场客户端：index.json + ETag 缓存 + 镜像回退 + SHA-256 校验
+    Update/               更新检查：GitCode 优先 → 失败回退 GitHub（只提醒，不下载不安装）
     SettingsService.cs    设置存储（%LocalAppData%\WinIsland\settings.json）
     Win32.cs              窗口样式、DWM、任务栏条带、topmost 自愈、窗口形状等全部 P/Invoke
   Modules/                内置插件：Media / Battery / Messaging
-  Settings/               设置窗口与各页面（通用 / 插件市场 / 插件管理）
+  Settings/               设置窗口与各页面（通用 / 插件市场 / 插件管理 / 关于）
 samples/                  插件样例：HelloPlugin / XamlPlugin / HardwareMonitor
 tools/pack-plugin.ps1     把插件目录打成 .lwp
 installer/WinIsland.iss   Inno Setup 安装脚本（每用户安装，无需管理员）
@@ -317,6 +325,12 @@ installer/WinIsland.iss   Inno Setup 安装脚本（每用户安装，无需管�
 
 **Q：日志在哪里？**
 `%LocalAppData%\WinIsland\logs\`：`plugin.host.log` 是宿主日志，每个插件另有 `plugin.<id>.log`。
+
+**Q：怎么更新到新版本？**
+「设置 → 关于」或右键托盘图标 →「检查更新…」：先查 GitCode 国内镜像，失败回退 GitHub 官方源，
+版本更新的那一版会连同更新说明一起显示出来。下载与安装由你自己点按钮完成——程序不会在后台下载、
+也不会静默替换自己；不想再看到的那一版可以点「跳过此版本」。
+（检查的仓库默认是官方仓库，开发验证时可以用设置键 `update.repo` = `owner/repo` 指到别处。）
 
 ---
 

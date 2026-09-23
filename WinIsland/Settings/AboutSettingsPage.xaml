@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="WinIsland.Settings.AboutSettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <StackPanel Spacing="8">
+        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="关于" />
+        <TextBlock
+            Margin="0,0,0,12"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            Style="{StaticResource CaptionTextBlockStyle}"
+            Text="版本信息与更新检查" />
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock x:Name="VersionText" Text="WinIsland" />
+                    <TextBlock
+                        x:Name="BuildText"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        TextWrapping="Wrap" />
+                    <TextBlock
+                        x:Name="StatusText"
+                        Margin="0,4,0,0"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="10">
+                    <ProgressRing x:Name="Busy" Width="18" Height="18" IsActive="False" />
+                    <Button
+                        x:Name="CheckButton"
+                        Click="Check_Click"
+                        Content="检查更新" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border
+            x:Name="UpdateCard"
+            Style="{StaticResource SettingsCardStyle}"
+            Visibility="Collapsed">
+            <StackPanel Spacing="8">
+                <TextBlock x:Name="UpdateTitle" />
+                <TextBlock
+                    x:Name="UpdateMeta"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    TextWrapping="Wrap" />
+                <Border
+                    Padding="12,10"
+                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6">
+                    <ScrollViewer
+                        MaxHeight="260"
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <ContentControl x:Name="NotesHost" />
+                            <TextBlock
+                                x:Name="NoNotesText"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="（这一版没有写更新说明）"
+                                TextWrapping="Wrap"
+                                Visibility="Collapsed" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button
+                        x:Name="OpenReleaseButton"
+                        Click="OpenRelease_Click"
+                        Style="{StaticResource AccentButtonStyle}" />
+                    <Button
+                        x:Name="DirectButton"
+                        Click="DirectDownload_Click"
+                        Content="直接下载本机安装包"
+                        Visibility="Collapsed" />
+                    <Button
+                        x:Name="SkipButton"
+                        Click="Skip_Click"
+                        Content="跳过此版本" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <Border
+            x:Name="SkippedCard"
+            Style="{StaticResource SettingsCardStyle}"
+            Visibility="Collapsed">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock x:Name="SkippedText" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="这一版不再提示；出现更新的版本时会自动恢复"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <Button
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    Click="CancelSkip_Click"
+                    Content="取消跳过" />
+            </Grid>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="自动检查更新" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="启动后台检查新版本（最多 6 小时一次），发现新版本会在岛上提示；程序不会自动下载或安装"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <ToggleSwitch
+                    x:Name="AutoCheckToggle"
+                    Grid.Column="1"
+                    MinWidth="0"
+                    VerticalAlignment="Center"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="AutoCheckToggle_Toggled" />
+            </Grid>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <StackPanel Spacing="4">
+                <TextBlock Text="链接" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="检查顺序：先 GitCode 国内镜像，失败再回退 GitHub 官方源"
+                    TextWrapping="Wrap" />
+                <StackPanel
+                    Margin="0,8,0,0"
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <Button Click="OpenGitCode_Click" Content="GitCode 镜像" />
+                    <Button Click="OpenGitHub_Click" Content="GitHub 仓库" />
+                    <Button Click="OpenLogs_Click" Content="打开日志目录" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</UserControl>
