@@ -1,7 +1,7 @@
 {
   "id": "weather-island",
   "name": "天气小岛",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "entry_dll": "WeatherIsland.dll",
   "api_version": 2,
   "min_host_version": "2.3.0",
