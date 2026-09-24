@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
+using Windows.Storage;
 using Windows.Storage.Streams;
 using WinIsland.Core;
 using WinIsland.Core.Plugins;
@@ -382,6 +383,9 @@ public sealed partial class IslandWindow : Window
         => new(
             IslandRoot.ActualWidth > 0 ? IslandRoot.ActualWidth : _currentIsland.Width,
             IslandRoot.ActualHeight > 0 ? IslandRoot.ActualHeight : _currentIsland.Height);
+
+    /// <summary>窗口句柄。宿主内置的投放动作要拿它给系统对话框（如「另存为」）当 owner。</summary>
+    internal nint Handle => _hwnd;
 
     /// <summary>
     /// 主岛（不含队列卡片）的屏幕矩形，物理像素。岛体隐藏期间同样可算 ——
@@ -2133,6 +2137,10 @@ public sealed partial class IslandWindow : Window
     private readonly DispatcherQueueTimer _dropExitGrace;
     /// <summary>本次会话读出来的载荷（卡片可投状态与摘要都按它算；未知表示还没读完）。</summary>
     private DropPayload _dropPayload = DropPayload.Unknown;
+    /// <summary>这次拖拽的内容能不能接（格式判断只做一次，DragOver 复用）。</summary>
+    private bool _dropSupported;
+    /// <summary>这次拖拽的内容读不出来（未知格式/浏览器虚拟文件）：本次拖拽期间不再展开面板，免得反复开合。</summary>
+    private bool _dropUnreadable;
     /// <summary>最近一次 DragOver 的位置（滚动视口坐标，DIP）。</summary>
     private double _dropPointerX = double.NaN;
     private double _dropOffset;
@@ -2177,7 +2185,10 @@ public sealed partial class IslandWindow : Window
 
     private void IslandRoot_DragEnter(object sender, DragEventArgs e)
     {
-        if (DescribeDrag(e.DataView) is IslandDropKind.None)
+        // 格式判断会同步调用源进程（Contains）：每次拖拽只问一次，DragOver 用缓存结果 ——
+        // 拖拽期间 DragOver 触发频率很高，不能每次都去问源进程
+        _dropSupported = DescribeDrag(e.DataView) != IslandDropKind.None;
+        if (!_dropSupported)
         {
             return;
         }
@@ -2192,14 +2203,14 @@ public sealed partial class IslandWindow : Window
 
     private void IslandRoot_DragOver(object sender, DragEventArgs e)
     {
-        if (DescribeDrag(e.DataView) is IslandDropKind.None)
+        if (!_dropSupported)
         {
             e.AcceptedOperation = DataPackageOperation.None;
             e.Handled = true;
             return;
         }
 
-        if (!_dropping && !_spotlightOccluded) BeginDropSession(e);
+        if (!_dropping) BeginDropSession(e);
 
         e.AcceptedOperation = _dropping ? DataPackageOperation.Copy : DataPackageOperation.None;
         e.Handled = true;
@@ -2213,6 +2224,7 @@ public sealed partial class IslandWindow : Window
     private void IslandRoot_DragLeave(object sender, DragEventArgs e)
     {
         e.Handled = true;
+        _dropUnreadable = false;   // 这次拖拽离开岛体：下一次（新拖拽）重新允许展开
         if (!_dropping) return;
 
         _dropExitGrace.Stop();
@@ -2255,15 +2267,14 @@ public sealed partial class IslandWindow : Window
 
             _log.Info($"投放「{target.Target.Title}」（{target.Owner}）：{Describe(payload)}。");
             var message = await target.Target.Handler(BuildContext(payload));
-            if (!string.IsNullOrEmpty(message))
+
+            // 每个动作都要有反馈：插件没返回文案时，宿主补一条默认的「已完成」
+            ShowMessage(new IslandMessage
             {
-                ShowMessage(new IslandMessage
-                {
-                    Title = message,
-                    Glyph = target.Target.Glyph,
-                    AccentColor = target.Target.AccentColor,
-                });
-            }
+                Title = string.IsNullOrWhiteSpace(message) ? $"已完成「{target.Target.Title}」" : message,
+                Glyph = target.Target.Glyph,
+                AccentColor = target.Target.AccentColor,
+            });
         }
         catch (Exception ex)
         {
@@ -2279,6 +2290,7 @@ public sealed partial class IslandWindow : Window
     private void BeginDropSession(DragEventArgs e)
     {
         if (_dropping) return;
+        if (_dropUnreadable) return;        // 这次拖拽的内容读不出来，别再反复开合
         if (!_settings.Get(DropEnabledKey, true)) return;
 
         _dropping = true;
@@ -2442,6 +2454,17 @@ public sealed partial class IslandWindow : Window
         {
             var payload = await ReadPayloadAsync(view);
             if (sessionId != _dropSessionId || !_dropping) return;
+
+            if (!payload.IsKnown)
+            {
+                // 读不出来（未知格式、浏览器虚拟文件等）：收回面板，并且这次拖拽期间不再展开 ——
+                // 否则会停在"正在读取…"上一直亮着，看着像卡死
+                _log.Info("这次拖入的内容读不出来，投放面板已收回。");
+                _dropUnreadable = true;
+                EndDropSession();
+                return;
+            }
+
             _dropPayload = payload;
             _dropView?.SetPayload(payload);
             // 卡片刚按真实载荷筛过一遍，高亮索引跟着视图走（被收起来的那张不能再算数）
@@ -2453,62 +2476,144 @@ public sealed partial class IslandWindow : Window
         }
     }
 
-    /// <summary>按类型把 OLE 载荷读成宿主内部表示；读不出来时返回 <see cref="DropPayload.Unknown"/>。</summary>
-    private static async Task<DropPayload> ReadPayloadAsync(DataPackageView view)
+    /// <summary>
+    /// 读某个格式的超时时间。拖拽源（浏览器等）偶尔会对某个格式**一直不回应**，
+    /// 每次读都必须带超时，读不出来就按该格式不存在处理、走下一步退化。
+    /// </summary>
+    private static readonly TimeSpan DropProbeTimeout = TimeSpan.FromMilliseconds(400);
+    private static readonly TimeSpan DropFormatTimeout = TimeSpan.FromMilliseconds(2000);
+    /// <summary>整次载荷读取的总上限（各步超时之和的安全网）。</summary>
+    private static readonly TimeSpan DropReadTimeout = TimeSpan.FromMilliseconds(6000);
+
+    /// <summary>给一次读取套上超时；超时返回 default，并保证迟到的异常不会变成未观察异常。</summary>
+    private async Task<T?> ReadWithTimeoutAsync<T>(Task<T> task, TimeSpan timeout, string what)
     {
-        switch (DescribeDrag(view))
+        if (await Task.WhenAny(task, Task.Delay(timeout)) != task)
         {
-            case IslandDropKind.Files:
-            {
-                var paths = new List<string>();
-                var names = new List<string>();
-
-                foreach (var item in await view.GetStorageItemsAsync())
-                {
-                    // 虚拟机位（压缩包内、网络位置）没有真实路径，跳过
-                    if (string.IsNullOrEmpty(item.Path)) continue;
-                    paths.Add(item.Path);
-                    names.Add(item.Name);
-                }
-
-                return paths.Count > 0 ? new DropPayload(IslandDropKind.Files, paths, names) : DropPayload.Unknown;
-            }
-
-            case IslandDropKind.Text:
-            {
-                var text = await view.GetTextAsync();
-                return string.IsNullOrEmpty(text)
-                    ? DropPayload.Unknown
-                    : new DropPayload(IslandDropKind.Text, Array.Empty<string>(), Array.Empty<string>(), Text: text);
-            }
-
-            case IslandDropKind.Image:
-            {
-                var bytes = await ReadBitmapBytesAsync(view);
-                return bytes is { Length: > 0 }
-                    ? new DropPayload(IslandDropKind.Image, Array.Empty<string>(), Array.Empty<string>(), ImageBytes: bytes)
-                    : DropPayload.Unknown;
-            }
-
-            default:
-                return DropPayload.Unknown;
+            _log.Warn($"读取拖入的{what}超时（{timeout.TotalMilliseconds:0} ms），按读不出来处理");
+            _ = task.ContinueWith(t => _ = t.Exception, TaskScheduler.Default);
+            return default;
         }
+
+        return await task;
     }
 
-    /// <summary>读图片字节（保留源格式）。超过上限或读不出来返回 null，调用方按"不支持"处理。</summary>
-    private static async Task<byte[]?> ReadBitmapBytesAsync(DataPackageView view)
+    /// <summary>
+    /// 读一次拖入内容。**整段跑在线程池上**：<see cref="DataPackageView"/> 的每个成员（
+    /// <c>Contains</c> / <c>AvailableFormats</c> / <c>GetXxxAsync</c>）都是**同步 COM 调用**，
+    /// 源进程不回应时会直接阻塞调用线程 —— 放在 UI 线程上就会把整个界面冻住，超时也救不回来。
+    /// </summary>
+    private async Task<DropPayload> ReadPayloadAsync(DataPackageView view)
+    {
+        var payload = await ReadWithTimeoutAsync(
+            Task.Run(() => ReadPayloadCoreAsync(view)), DropReadTimeout, "拖入内容");
+
+        return payload ?? DropPayload.Unknown;
+    }
+
+    /// <summary>
+    /// 载荷读取的**退化链**（每一步都带超时，读不出来就往下走）：
+    /// 真实文件 → 图片 → 文本。
+    ///
+    /// 「真实文件」只认 <c>FileDrop</c>（CF_HDROP）：浏览器拖图片时会用
+    /// <c>FileGroupDescriptorW</c> + <c>FileContents</c> 提供**虚拟文件**（没有 FileDrop），
+    /// 那种 <c>GetStorageItemsAsync</c> 读不出真实路径（会一直挂着）—— 让它落回图片/文本。
+    /// </summary>
+    private async Task<DropPayload> ReadPayloadCoreAsync(DataPackageView view)
+    {
+        string formats;
+        try
+        {
+            formats = string.Join("、", view.AvailableFormats);
+        }
+        catch (Exception ex)
+        {
+            formats = $"(读不到格式列表：{ex.Message})";
+        }
+
+        var payload = DropPayload.Unknown;
+
+        // 1) 存储项：真文件给路径；浏览器拖图片给的是"虚拟文件"（没有真实路径，但内容可读）→ 按图片读出字节
+        if (view.Contains(StandardDataFormats.StorageItems))
+        {
+            payload = await ReadStorageItemsAsync(view);
+        }
+
+        // 2) 位图（能拿到位图字节才算；SVG 这类浏览器给不出位图的会落到第 3 步）
+        if (!payload.IsKnown && await LooksLikeImageAsync(view))
+        {
+            var bytes = await ReadBitmapBytesAsync(view);
+            if (bytes is { Length: > 0 })
+            {
+                payload = new DropPayload(IslandDropKind.Image, Array.Empty<string>(), Array.Empty<string>(), ImageBytes: bytes);
+            }
+        }
+
+        // 3) 文本（纯文本选区、链接、虚拟文件/矢量图的地址都落在这里）
+        if (!payload.IsKnown && view.Contains(StandardDataFormats.Text))
+        {
+            var text = await SafeGetTextAsync(view);
+            if (!string.IsNullOrEmpty(text))
+            {
+                payload = new DropPayload(IslandDropKind.Text, Array.Empty<string>(), Array.Empty<string>(), Text: text);
+            }
+        }
+
+        _log.Debug($"拖入载荷：可用格式 [{formats}] → {(payload.IsKnown ? payload.Kind.ToString() : "读不出来")}");
+        return payload;
+    }
+
+    /// <summary>
+    /// 读存储项。两类要分开：
+    /// ① 真实文件（有绝对路径）→ 文件载荷；
+    /// ② **虚拟文件** —— 浏览器拖网页图片时给的就是这种（只有 <c>FileGroupDescriptorW</c> + <c>FileContents</c>，
+    ///   没有真实路径），内容仍可读：按扩展名认出是图片就把它读成字节，走图片载荷（SVG 也能原样保存）。
+    /// </summary>
+    private async Task<DropPayload> ReadStorageItemsAsync(DataPackageView view)
+    {
+        var items = await ReadWithTimeoutAsync(view.GetStorageItemsAsync().AsTask(), DropFormatTimeout, "文件列表");
+        if (items is null || items.Count == 0) return DropPayload.Unknown;
+
+        var paths = new List<string>();
+        var names = new List<string>();
+        StorageFile? virtualImage = null;
+
+        foreach (var item in items)
+        {
+            if (!string.IsNullOrEmpty(item.Path))
+            {
+                paths.Add(item.Path);
+                names.Add(item.Name);
+                continue;
+            }
+
+            // 虚拟机位（浏览器拖的图片、压缩包内、网络位置）：没有绝对路径
+            if (virtualImage is null && item is StorageFile file && IsImageExtension(file.FileType))
+            {
+                virtualImage = file;
+            }
+        }
+
+        if (paths.Count > 0) return new DropPayload(IslandDropKind.Files, paths, names);
+
+        if (virtualImage is not null)
+        {
+            var bytes = await ReadStorageFileBytesAsync(virtualImage);
+            if (bytes is { Length: > 0 })
+            {
+                _log.Info($"拖入的是虚拟文件「{virtualImage.Name}」（浏览器提供，没有真实路径），已按图片读出内容：{bytes.Length / 1024} KB");
+                return new DropPayload(IslandDropKind.Image, Array.Empty<string>(), Array.Empty<string>(), ImageBytes: bytes);
+            }
+        }
+
+        return DropPayload.Unknown;
+    }
+
+    private async Task<byte[]?> ReadStorageFileBytesAsync(StorageFile file)
     {
         try
         {
-            var reference = await view.GetBitmapAsync();
-            using var stream = await reference.OpenReadAsync();
-            if (stream.Size == 0 || stream.Size > (ulong)MaxDropImageBytes) return null;
-
-            var bytes = new byte[stream.Size];
-            using var reader = new DataReader(stream);
-            await reader.LoadAsync((uint)stream.Size);
-            reader.ReadBytes(bytes);
-            return bytes;
+            return await ReadWithTimeoutAsync(ReadStorageFileBytesCoreAsync(file), DropFormatTimeout, "文件内容");
         }
         catch (Exception)
         {
@@ -2516,9 +2621,121 @@ public sealed partial class IslandWindow : Window
         }
     }
 
+    private static async Task<byte[]?> ReadStorageFileBytesCoreAsync(StorageFile file)
+    {
+        using var stream = await file.OpenReadAsync();
+        if (stream.Size == 0 || stream.Size > (ulong)MaxDropImageBytes) return null;
+
+        var bytes = new byte[stream.Size];
+        using var reader = new DataReader(stream);
+        await reader.LoadAsync((uint)stream.Size);
+        reader.ReadBytes(bytes);
+        return bytes;
+    }
+
+    /// <summary>像不像图片拖拽：有位图格式，或 HTML 片段里带 &lt;img&gt;，或文本本身就是图片地址。</summary>
+    private async Task<bool> LooksLikeImageAsync(DataPackageView view)
+    {
+        if (view.Contains(StandardDataFormats.Bitmap)) return true;
+        if (await HasImageHtmlAsync(view)) return true;
+        return IsImageUrl(await SafeGetTextAsync(view));
+    }
+
+    /// <summary>HTML 片段里有没有 &lt;img&gt;：网页图片拖拽的典型特征（文字选区不会有）。</summary>
+    private async Task<bool> HasImageHtmlAsync(DataPackageView view)
+    {
+        try
+        {
+            if (!view.Contains(StandardDataFormats.Html)) return false;
+
+            // 探测用的超时更短：读不到就当没有，别为了判断类型把面板卡住
+            var html = await ReadWithTimeoutAsync(view.GetHtmlFormatAsync().AsTask(), DropProbeTimeout, "HTML 片段");
+            return html is not null && html.Contains("<img", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception)
+        {
+            return false;   // 读不到就当没有，按文本处理
+        }
+    }
+
+    private async Task<string?> SafeGetTextAsync(DataPackageView view)
+    {
+        try
+        {
+            return await ReadWithTimeoutAsync(view.GetTextAsync().AsTask(), DropFormatTimeout, "文本");
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>文本是不是一个"图片地址"（http(s)/file/data/绝对路径，且扩展名是图片）。</summary>
+    private static bool IsImageUrl(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+
+        var trimmed = text.Trim();
+        if (trimmed.Length > 2048 || trimmed.Contains('\n')) return false;   // 多行文本显然不是单个地址
+
+        bool looksLikeAddress = trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                                || trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                                || trimmed.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase)
+                                || trimmed.StartsWith("file://", StringComparison.OrdinalIgnoreCase)
+                                || (trimmed.Length > 2 && trimmed[1] == ':');     // C:\...
+        if (!looksLikeAddress) return false;
+
+        // 注意：本文件同时 using 了 Microsoft.UI.Xaml.Shapes（里面也有 Path），必须写全名
+        return IsImageExtension(System.IO.Path.GetExtension(trimmed));
+    }
+
+    /// <summary>扩展名是不是图片（含矢量图 svg）。传 ".png" 或 "png" 都行。</summary>
+    private static bool IsImageExtension(string? extension)
+    {
+        if (string.IsNullOrWhiteSpace(extension)) return false;
+
+        var normalized = extension.StartsWith('.') ? extension : "." + extension;
+        switch (normalized.ToLowerInvariant())
+        {
+            case ".png": case ".jpg": case ".jpeg": case ".gif": case ".bmp":
+            case ".webp": case ".tif": case ".tiff": case ".ico": case ".avif":
+            case ".svg": case ".heic":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>读图片字节（保留源格式）。超时、超限或读不出来返回 null，调用方按"不支持"处理。</summary>
+    private async Task<byte[]?> ReadBitmapBytesAsync(DataPackageView view)
+    {
+        try
+        {
+            return await ReadWithTimeoutAsync(ReadBitmapCoreAsync(view), DropFormatTimeout, "图片数据");
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static async Task<byte[]?> ReadBitmapCoreAsync(DataPackageView view)
+    {
+        var reference = await view.GetBitmapAsync();
+        using var stream = await reference.OpenReadAsync();
+        if (stream.Size == 0 || stream.Size > (ulong)MaxDropImageBytes) return null;
+
+        var bytes = new byte[stream.Size];
+        using var reader = new DataReader(stream);
+        await reader.LoadAsync((uint)stream.Size);
+        reader.ReadBytes(bytes);
+        return bytes;
+    }
+
     /// <summary>
-    /// 这次拖拽带的是哪种载荷（同步判定，DragEnter/DragOver 里用）。
-    /// 优先级：文件 &gt; 图片 &gt; 文本 —— 从浏览器拖图片时往往同时带文本（图片地址），那种情况要当图片处理。
+    /// 「这次拖拽能不能接」的同步判定（DragEnter/DragOver 用）：有文件、图片或文本之一就接。
+    /// 到底算哪种载荷由 <see cref="ResolveKindAsync"/> 读到内容后再定 ——
+    /// 同步阶段分辨不出「文字选区附带的那张快照位图」。
     /// </summary>
     private static IslandDropKind DescribeDrag(DataPackageView view)
     {

@@ -96,8 +96,8 @@ public partial class App : Application
             _service.AddSettingsPage(new SettingsPageDescriptor(
                 "about", "关于", "\uE946", () => new AboutSettingsPage(_updates), 1100));
 
-            // 宿主内置的文件投放动作（打开 / 所在位置 / 复制路径）
-            HostDropTargets.Register(_service, _logs.Host);
+            // 宿主内置的文件投放动作（打开 / 所在位置 / 复制路径 / 复制文本 / 保存图片）
+            HostDropTargets.Register(_service, _logs.Host, _island.Handle);
 
             _service.SendMessage(new IslandMessage
             {

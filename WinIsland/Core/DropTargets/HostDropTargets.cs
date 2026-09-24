@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Storage;
+using Windows.Storage.Pickers;
 using WinIsland.Core;
 
 namespace WinIsland.Core.DropTargets;
@@ -14,13 +16,14 @@ public static class HostDropTargets
     /// <summary>宿主目标的 ownerId（插件用插件 Id，永远不会撞上）。</summary>
     private const string Owner = "(host)";
 
-    public static void Register(IslandService service, IPluginLogger log)
+    /// <param name="ownerHwnd">岛窗口句柄：系统对话框（「另存为」）要它当 owner，未打包应用必须显式传。</param>
+    public static void Register(IslandService service, IPluginLogger log, nint ownerHwnd)
     {
         service.AddDropTarget(Owner, Open(log));
         service.AddDropTarget(Owner, Reveal(log));
         service.AddDropTarget(Owner, CopyPaths());
         service.AddDropTarget(Owner, CopyText());
-        service.AddDropTarget(Owner, SaveImage(log));
+        service.AddDropTarget(Owner, SaveImage(log, ownerHwnd));
     }
 
     private static IslandDropTarget Open(IPluginLogger log) => new()
@@ -121,41 +124,53 @@ public static class HostDropTargets
         },
     };
 
-    private static IslandDropTarget SaveImage(IPluginLogger log) => new()
+    private static IslandDropTarget SaveImage(IPluginLogger log, nint ownerHwnd) => new()
     {
         Id = "host.saveImage",
         Title = "保存图片",
         Glyph = "\uE91B",
         Order = 940,
         Kinds = IslandDropKind.Image,
-        Handler = ctx =>
+        Handler = async ctx =>
         {
             if (ctx.ImageBytes is not { Length: > 0 } bytes)
             {
-                return Task.FromResult<string?>("这张图片读不出来");
+                return "这张图片读不出来";
             }
 
             try
             {
-                var directory = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "WinIsland");
-                Directory.CreateDirectory(directory);
+                // 存哪儿由用户决定：弹系统「另存为」
+                // （未打包应用必须把窗口句柄交给 picker，否则会直接抛异常）
+                var extension = SniffImageExtension(bytes);
+                var picker = new FileSavePicker
+                {
+                    SuggestedStartLocation = PickerLocationId.PicturesLibrary,
+                    SuggestedFileName = $"图片-{DateTime.Now:yyyyMMdd-HHmmss}",
+                };
+                picker.FileTypeChoices.Add(extension == ".bin" ? "文件" : "图片", new List<string> { extension });
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, ownerHwnd);
 
-                // 载荷保留的是源格式，按魔数给对扩展名（否则 .png 里装着 JPEG）
-                var file = Path.Combine(directory, $"drop-{DateTime.Now:yyyyMMdd-HHmmss}{SniffImageExtension(bytes)}");
-                File.WriteAllBytes(file, bytes);
-                log.Info($"投放的图片已保存：{file}（{bytes.Length / 1024} KB）");
-                return Task.FromResult<string?>($"已保存「{Path.GetFileName(file)}」");
+                var file = await picker.PickSaveFileAsync();
+                if (file is null)
+                {
+                    log.Info("投放的图片已取消保存");
+                    return "已取消保存";
+                }
+
+                await FileIO.WriteBytesAsync(file, bytes);
+                log.Info($"投放的图片已保存：{file.Path}（{bytes.Length / 1024} KB）");
+                return $"已保存到「{file.Name}」";
             }
             catch (Exception ex)
             {
                 log.Warn($"保存投放的图片失败：{ex.Message}");
-                return Task.FromResult<string?>($"保存图片失败：{ex.Message}");
+                return $"保存图片失败：{ex.Message}";
             }
         },
     };
 
-    /// <summary>按魔数猜图片格式（浏览器拖过来的图片多半是 PNG / JPEG，识别不出就存 .bin）。</summary>
+    /// <summary>按魔数猜图片格式（浏览器拖过来的图片多半是 PNG / JPEG / SVG，识别不出就存 .bin）。</summary>
     private static string SniffImageExtension(byte[] bytes)
     {
         if (bytes.Length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) return ".png";
@@ -164,7 +179,23 @@ public static class HostDropTargets
         if (bytes.Length >= 2 && bytes[0] == 0x42 && bytes[1] == 0x4D) return ".bmp";
         if (bytes.Length >= 12 && bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46
             && bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50) return ".webp";
+        if (LooksLikeSvg(bytes)) return ".svg";
         return ".bin";
+    }
+
+    /// <summary>
+    /// SVG 是文本格式，没有魔数：跳过 UTF-8 BOM 与空白后看开头是不是 <c>&lt;svg</c> / <c>&lt;?xml</c>（带 svg）。
+    /// 网页里拖的图标大多是 SVG，按 .svg 存下来才能保留矢量。
+    /// </summary>
+    private static bool LooksLikeSvg(byte[] bytes)
+    {
+        var limit = Math.Min(bytes.Length, 1024);
+        var text = System.Text.Encoding.UTF8.GetString(bytes, 0, limit).TrimStart('\uFEFF', ' ', '\r', '\n', '\t');
+        if (!text.StartsWith("<", StringComparison.Ordinal)) return false;
+
+        return text.StartsWith("<svg", StringComparison.OrdinalIgnoreCase)
+               || (text.StartsWith("<?xml", StringComparison.OrdinalIgnoreCase)
+                   && text.Contains("<svg", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>剪贴板会被别的程序短暂独占（CLIPBRD_E_CANT_OPEN），重试几次再放弃。</summary>

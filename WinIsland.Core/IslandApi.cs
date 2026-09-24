@@ -106,7 +106,8 @@ public sealed class IslandDropTarget
     /// <summary>
     /// 接受哪些载荷类型，默认只收文件（<see cref="IslandDropKind.Files"/>）。
     /// 可以组合，例如 <c>IslandDropKind.Files | IslandDropKind.Image</c>；
-    /// 载荷类型不匹配时卡片变暗且无法投放。
+    /// 载荷类型不匹配时**这张卡片根本不出现**。
+    /// 类型由宿主按内容判定（文件 &gt; 图片 &gt; 文本），其中「文字选区附带的快照位图」不会被当成图片。
     /// </summary>
     public IslandDropKind Kinds { get; init; } = IslandDropKind.Files;
 
@@ -117,7 +118,8 @@ public sealed class IslandDropTarget
     public IReadOnlyList<string>? Extensions { get; init; }
 
     /// <summary>
-    /// 松手时执行。返回的文案由宿主弹一条临时消息反馈给用户（返回 null 表示不提示）。
+    /// 松手时执行。**返回的文案会由宿主弹一条临时消息反馈给用户**（每个动作都要有反馈）；
+    /// 返回 null / 空字符串时宿主代你弹一条「已完成「卡片标题」」。
     /// 在 UI 线程被调用；异常由宿主隔离，只记日志、不会崩宿主。
     /// </summary>
     public required Func<IslandDropContext, Task<string?>> Handler { get; init; }
