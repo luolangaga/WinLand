@@ -1,0 +1,14 @@
+{
+  "id": "device-island",
+  "name": "设备插拔岛",
+  "version": "1.0.0",
+  "entry_dll": "DeviceIsland.dll",
+  "api_version": 2,
+  "min_host_version": "2.3.0",
+  "description": "插 U 盘 / 耳机 / 手柄时岛上自动冒出；展开逐台列出当前设备，带「打开」「安全弹出」",
+  "author": "luolangaga",
+  "icon_glyph": "\uE88E",
+  "homepage": "https://github.com/luolangaga/device-island",
+  "license": "MIT",
+  "tags": ["device", "usb", "removable", "audio", "gamepad", "eject"]
+}

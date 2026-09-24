@@ -93,7 +93,9 @@ public sealed class WeatherSettingsPage : UserControl
         });
         panel.Children.Add(new TextBlock
         {
-            Text = "小岛显示天气图标和当前温度；把鼠标移到岛上展开，可以看到地点、更新时间和今天 / 明天 / 后天三天的预报。",
+            Text = "小岛显示天气图标和当前温度；把鼠标移到岛上展开，可以看到地点、更新时间和今天 / 明天 / 后天三天的预报。"
+                   + "点一下岛体会弹出一张大卡片：实况细节（体感、湿度、风、降水、紫外线、云量、气压、空气质量）、"
+                   + "未来 24 小时逐时、未来 7 天（含日出日落），按 Esc 或点卡片外区域收起。",
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
             Foreground = Hint(180),

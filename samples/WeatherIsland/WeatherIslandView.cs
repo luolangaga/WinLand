@@ -147,7 +147,7 @@ public sealed class WeatherIslandView : UserControl, IMorphView
 
         if (hasData)
         {
-            _icon.Child = WeatherIcon.Create(snapshot.Code);
+            _icon.Child = WeatherIcon.Create(snapshot.Code, snapshot.IsDay);
             _place.Text = $"{snapshot.Place} · {snapshot.UpdatedAt:HH:mm} 更新";
         }
         else

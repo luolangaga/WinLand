@@ -26,19 +26,21 @@ internal static class WeatherIcon
     private static readonly Color BoltColor = Color.FromArgb(255, 0xFF, 0xD2, 0x4D);
     private static readonly Color FogColor = Color.FromArgb(255, 0xCB, 0xD1, 0xD8);
 
-    /// <summary>按 WMO 天气代码生成一个 24×24 的画布。</summary>
-    public static Canvas Create(int code)
+    /// <summary>按 WMO 天气代码生成一个 24×24 的画布。<paramref name="isDay"/> 决定晴天画太阳还是月亮。</summary>
+    public static Canvas Create(int code, bool isDay = true)
     {
         var canvas = new Canvas { Width = Design, Height = Design };
 
         switch (WeatherCodes.Kind(code))
         {
             case WeatherKind.Sunny:
-                AddSun(canvas, 12, 12, 5.5, 9.0, 3.4, 2.1);
+                if (isDay) AddSun(canvas, 12, 12, 5.5, 9.0, 3.4, 2.1);
+                else AddMoon(canvas, 12, 12, 6.2, 1.6);
                 break;
 
             case WeatherKind.PartlyCloudy:
-                AddSun(canvas, 8.2, 8.2, 3.6, 6.6, 2.6, 1.7);
+                if (isDay) AddSun(canvas, 8.2, 8.2, 3.6, 6.6, 2.6, 1.7);
+                else AddMoon(canvas, 8.8, 7.8, 4.4, 1.3);
                 AddCloud(canvas, 1.2, 2.8, CloudLight);
                 break;
 
@@ -94,6 +96,23 @@ internal static class WeatherIcon
         }
 
         AddEllipse(canvas, cx - radius, cy - radius, radius * 2, radius * 2, SunColor);
+    }
+
+    /// <summary>
+    /// 夜间晴 / 少云用月亮。画的是满月加两处环形山（Canvas 上没法"挖洞"，月牙得用两段
+    /// 圆弧拼路径，不值得为这点装饰引入解析不确定的几何），旁边点两颗小星强调"夜里"。
+    /// </summary>
+    private static void AddMoon(Canvas canvas, double cx, double cy, double radius, double starRadius)
+    {
+        var moon = Color.FromArgb(255, 0xDC, 0xE6, 0xF5);
+        var crater = Color.FromArgb(255, 0xBD, 0xCC, 0xE2);
+
+        AddEllipse(canvas, cx - radius, cy - radius, radius * 2, radius * 2, moon);
+        AddEllipse(canvas, cx - radius * 0.46, cy - radius * 0.34, radius * 0.52, radius * 0.52, crater);
+        AddEllipse(canvas, cx + radius * 0.20, cy + radius * 0.12, radius * 0.36, radius * 0.36, crater);
+
+        AddEllipse(canvas, cx + radius * 1.02, cy - radius * 1.20, starRadius, starRadius, moon);
+        AddEllipse(canvas, cx + radius * 1.52, cy - radius * 0.62, starRadius * 0.7, starRadius * 0.7, moon);
     }
 
     private static void AddCloud(Canvas canvas, double dx, double dy, Color color)

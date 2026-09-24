@@ -16,6 +16,7 @@ public sealed class WeatherIslandPlugin : IslandPluginBase
 
     private WeatherService _service = null!;
     private WeatherIslandView _view = null!;
+    private WeatherSpotlightView? _spotlight;
     private IslandLiveContent _content = null!;
     private WeatherSnapshot _snapshot = WeatherSnapshot.Empty;
     private IDisposable? _timer;
@@ -41,6 +42,8 @@ public sealed class WeatherIslandPlugin : IslandPluginBase
         // 岛体换主题（Fluent 跟随系统明暗）：代码搭的视图颜色烘在画刷里，就地重刷一遍
         Context.Theme.Changed += OnThemeChanged;
         Context.Register(new ActionDisposable(() => Context.Theme.Changed -= OnThemeChanged));
+        // 聚光卡是另一棵树、自己订阅了主题事件，插件停用时要一起退订
+        Context.Register(new ActionDisposable(() => _spotlight?.Detach()));
 
         _content = new IslandLiveContent
         {
@@ -51,7 +54,7 @@ public sealed class WeatherIslandPlugin : IslandPluginBase
             MorphView = _view,
             CompactSize = new Windows.Foundation.Size(250, 40),
             ExpandedSize = new Windows.Foundation.Size(420, 140),
-            OnTap = ShowDetail,
+            OnTap = OpenSpotlight,      // 点击岛体 = 打开「超级展开」聚光卡
         };
 
         Context.Island.AddSettingsPage(new SettingsPageDescriptor(
@@ -154,6 +157,16 @@ public sealed class WeatherIslandPlugin : IslandPluginBase
             if (_stopped) return;
             _view.Apply(applied);
 
+            // 聚光卡正开着的话同步刷新（它可能是被别的窗口单独渲染的一棵树）
+            try
+            {
+                _spotlight?.Apply(applied);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"聚光卡内容同步失败（已忽略）：{ex.Message}");
+            }
+
             // 设置页的监听者出错不能影响宿主：这里单独兜住
             try
             {
@@ -201,27 +214,26 @@ public sealed class WeatherIslandPlugin : IslandPluginBase
         return string.IsNullOrWhiteSpace(city) ? DefaultCity : city.Trim();
     }
 
-    /// <summary>点击小岛：弹一条当天的详细消息；还没有数据就顺手取一次。</summary>
-    private void ShowDetail()
+    /// <summary>
+    /// 点击小岛：打开「超级展开」聚光卡。
+    ///
+    /// 大岛（420×140）装不下的信息——逐小时、7 天、空气质量、日出日落——都放进卡片里，
+    /// 不再往岛里继续塞元素；卡片的飞入飞回、遮罩、Esc 收起全由宿主负责，插件只管内容。
+    /// </summary>
+    private void OpenSpotlight()
     {
-        var snapshot = _snapshot;
-        if (!snapshot.HasData)
-        {
-            _ = RefreshAsync("点击刷新");
-            return;
-        }
+        // 还没数据就先取一次，卡片里会显示「正在获取天气…」而不是一块空板
+        if (!_snapshot.HasData) _ = RefreshAsync("打开聚光卡");
 
-        var today = snapshot.Days.Count > 0 ? snapshot.Days[0] : null;
-        var text = today is null
-            ? $"{snapshot.Temperature:0.#}°C {WeatherCodes.Describe(snapshot.Code)}"
-            : $"{snapshot.Temperature:0.#}°C {WeatherCodes.Describe(snapshot.Code)}，今天 {today.Max:0}° / {today.Min:0}°";
+        // 卡片必须是独立于岛视图的另一棵可视树；实例缓存复用，不要每次重建
+        _spotlight ??= new WeatherSpotlightView(Theme, () => RefreshAsync("卡片内刷新"));
+        _spotlight.Apply(_snapshot);
 
-        Context.Island.ShowMessage(new IslandMessage
+        Context.Island.OpenSpotlight(new IslandSpotlight
         {
-            Title = $"天气 · {snapshot.Place}",
-            Text = text,
-            Glyph = Manifest.IconGlyph ?? "\uE9CA",
-            Duration = TimeSpan.FromSeconds(3),
+            Content = _spotlight,
+            Size = WeatherSpotlightView.PreferredSize,
+            OnClosed = () => _spotlight?.OnHostClosed(),
         });
     }
 }

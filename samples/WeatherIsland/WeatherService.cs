@@ -5,17 +5,70 @@ using System.Text.Json.Serialization;
 
 namespace WeatherIsland;
 
+/// <summary>逐小时预报里的一格。</summary>
+public sealed record HourlyForecast(
+    string Label,
+    int Code,
+    double Temperature,
+    int PrecipProbability,
+    double WindSpeed,
+    bool IsDay);
+
 /// <summary>一天的预报。</summary>
-public sealed record DailyForecast(string Label, int Code, double Max, double Min);
+public sealed record DailyForecast(
+    string Label,
+    string Weekday,
+    int Code,
+    double Max,
+    double Min,
+    int PrecipProbability,
+    double UvIndex,
+    string Sunrise,
+    string Sunset,
+    double WindMax,
+    double PrecipSum);
+
+/// <summary>空气质量（Open-Meteo 空气质量接口）。</summary>
+public sealed record AirQuality(double Pm25, double Pm10, double UsAqi, double EuropeanAqi);
 
 /// <summary>一次取回的天气快照。没有数据时 <see cref="Error"/> 带原因。</summary>
 public sealed record WeatherSnapshot
 {
     public bool HasData { get; init; }
     public string Place { get; init; } = "";
+    public bool IsDay { get; init; } = true;
+
+    // ---- 当前实况 ----
     public double Temperature { get; init; }
+    public double ApparentTemperature { get; init; }
+    public double Humidity { get; init; }
+    public double DewPoint { get; init; }
+    public double Pressure { get; init; }
+    public double CloudCover { get; init; }
+    public double Visibility { get; init; }          // km
+    public double WindSpeed { get; init; }           // m/s
+    public double WindGust { get; init; }            // m/s
+    public double WindDirection { get; init; }       // 度
+    public double Precipitation { get; init; }       // mm
+    public int PrecipProbabilityNow { get; init; }   // %
     public int Code { get; init; }
+
+    // ---- 今日汇总 ----
+    public double TodayMax { get; init; }
+    public double TodayMin { get; init; }
+    public double TodayApparentMax { get; init; }
+    public double TodayApparentMin { get; init; }
+    public int PrecipProbability { get; init; }      // 今日最高降水概率 %
+    public double PrecipSum { get; init; }           // 今日累计降水 mm
+    public double UvIndexMax { get; init; }
+    public string Sunrise { get; init; } = "";
+    public string Sunset { get; init; } = "";
+    public string Daylight { get; init; } = "";
+
+    public AirQuality? Air { get; init; }
+    public IReadOnlyList<HourlyForecast> Hours { get; init; } = Array.Empty<HourlyForecast>();
     public IReadOnlyList<DailyForecast> Days { get; init; } = Array.Empty<DailyForecast>();
+
     public DateTimeOffset UpdatedAt { get; init; }
     public string? Error { get; init; }
 
@@ -64,6 +117,7 @@ public static class WeatherCodes
         56 => "冻毛毛雨",
         57 => "冻雨",
         61 => "小雨",
+        62 => "中雨",
         63 => "中雨",
         65 => "大雨",
         66 => "冻雨",
@@ -82,16 +136,76 @@ public static class WeatherCodes
         99 => "强雷阵雨伴冰雹",
         _ => "未知",
     };
+
+    private static readonly string[] CompassPoints =
+        { "北", "东北", "东", "东南", "南", "西南", "西", "西北" };
+
+    /// <summary>风向角度 → 八方位中文。</summary>
+    public static string Compass(double degrees)
+    {
+        var normalized = ((degrees % 360) + 360) % 360;
+        var index = (int)Math.Round(normalized / 45) % 8;
+        return CompassPoints[index];
+    }
+
+    /// <summary>紫外线指数等级（WHO 口径）。</summary>
+    public static string UvLabel(double uv) => uv switch
+    {
+        < 0.5 => "无",
+        < 3 => "弱",
+        < 6 => "中等",
+        < 8 => "强",
+        < 11 => "很强",
+        _ => "极强",
+    };
+
+    /// <summary>PM2.5 浓度等级（μg/m³，参考国标日均限值）。</summary>
+    public static string Pm25Label(double pm25) => pm25 switch
+    {
+        <= 35 => "优",
+        <= 75 => "良",
+        <= 115 => "轻度污染",
+        <= 150 => "中度污染",
+        <= 250 => "重度污染",
+        _ => "严重污染",
+    };
+
+    /// <summary>美国 AQI 等级。</summary>
+    public static string AqiLabel(double aqi) => aqi switch
+    {
+        <= 50 => "优",
+        <= 100 => "良",
+        <= 150 => "轻度污染",
+        <= 200 => "中度污染",
+        <= 300 => "重度污染",
+        _ => "严重污染",
+    };
+
+    /// <summary>能见度描述。</summary>
+    public static string VisibilityLabel(double km) => km switch
+    {
+        < 1 => "很差",
+        < 5 => "较差",
+        < 10 => "一般",
+        < 20 => "良好",
+        _ => "极佳",
+    };
 }
 
 /// <summary>
 /// Open-Meteo 客户端：免费、不用注册、不用 API Key。
-/// 先用城市名换经纬度（geocoding），再取当前天气 + 三天预报。
+/// 先用城市名换经纬度（geocoding），再取实况 + 逐小时 + 7 天预报；空气质量单独一次请求。
 /// </summary>
 public sealed class WeatherService : IDisposable
 {
     private const string GeoEndpoint = "https://geocoding-api.open-meteo.com/v1/search";
     private const string ForecastEndpoint = "https://api.open-meteo.com/v1/forecast";
+    private const string AirEndpoint = "https://air-quality-api.open-meteo.com/v1/air-quality";
+
+    private const int ForecastDays = 7;
+    private const int HourlyCount = 24;
+
+    private static readonly string[] Weekdays = { "周日", "周一", "周二", "周三", "周四", "周五", "周六" };
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -105,7 +219,7 @@ public sealed class WeatherService : IDisposable
     public WeatherService()
     {
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd("WinIsland-WeatherIsland/1.0");
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd("WinIsland-WeatherIsland/1.1");
     }
 
     public void Dispose()
@@ -148,39 +262,128 @@ public sealed class WeatherService : IDisposable
         // 坐标必须用不变区域格式（小数点），否则某些系统区域设置会拼出 "30,25" 这种非法值
         var url = string.Format(CultureInfo.InvariantCulture,
             "{0}?latitude={1:0.####}&longitude={2:0.####}"
-            + "&current=temperature_2m,weather_code"
-            + "&daily=weather_code,temperature_2m_max,temperature_2m_min"
-            + "&timezone=auto&forecast_days=3",
-            ForecastEndpoint, latitude, longitude);
+            + "&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,"
+            + "precipitation,weather_code,cloud_cover,surface_pressure,"
+            + "wind_speed_10m,wind_direction_10m,wind_gusts_10m"
+            + "&hourly=temperature_2m,weather_code,precipitation_probability,dew_point_2m,"
+            + "visibility,uv_index,wind_speed_10m,is_day"
+            + "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
+            + "apparent_temperature_max,apparent_temperature_min,"
+            + "precipitation_probability_max,precipitation_sum,uv_index_max,"
+            + "sunrise,sunset,daylight_duration,wind_speed_10m_max"
+            + "&timezone=auto&forecast_days={3}",
+            ForecastEndpoint, latitude, longitude, ForecastDays);
 
         var payload = await GetJsonAsync<ForecastResponse>(url, cancellationToken).ConfigureAwait(false)
                       ?? throw new InvalidOperationException("天气服务返回了空数据");
 
         var current = payload.Current ?? throw new InvalidOperationException("天气服务没有返回当前天气");
 
-        var days = new List<DailyForecast>();
-        var labels = new[] { "今天", "明天", "后天" };
-        if (payload.Daily?.Time is { Count: > 0 } times)
+        // 空气质量是另一个接口、另一个域名：失败只让这一块显示「--」，不能拖垮主数据
+        var air = await TryFetchAirAsync(latitude, longitude, cancellationToken).ConfigureAwait(false);
+
+        var hourStart = FindCurrentHour(payload.Hourly?.Time);
+
+        var hours = new List<HourlyForecast>();
+        if (payload.Hourly?.Time is { Count: > 0 } hourlyTimes)
         {
-            for (var i = 0; i < times.Count && i < labels.Length; i++)
+            for (var i = hourStart; i < hourlyTimes.Count && hours.Count < HourlyCount; i++)
             {
-                days.Add(new DailyForecast(
-                    labels[i],
-                    At(payload.Daily.WeatherCode, i),
-                    At(payload.Daily.TemperatureMax, i),
-                    At(payload.Daily.TemperatureMin, i)));
+                hours.Add(new HourlyForecast(
+                    HourLabel(hourlyTimes[i], hours.Count),
+                    Int(payload.Hourly.WeatherCode, i),
+                    Num(payload.Hourly.Temperature, i),
+                    (int)Math.Round(Num(payload.Hourly.PrecipitationProbability, i)),
+                    Num(payload.Hourly.WindSpeed, i),
+                    Int(payload.Hourly.IsDay, i) != 0));
             }
         }
+
+        var days = new List<DailyForecast>();
+        if (payload.Daily?.Time is { Count: > 0 } dailyTimes)
+        {
+            for (var i = 0; i < dailyTimes.Count && i < ForecastDays; i++)
+            {
+                days.Add(new DailyForecast(
+                    DayLabel(i, dailyTimes[i]),
+                    WeekdayLabel(dailyTimes[i]),
+                    Int(payload.Daily.WeatherCode, i),
+                    Num(payload.Daily.TemperatureMax, i),
+                    Num(payload.Daily.TemperatureMin, i),
+                    (int)Math.Round(Num(payload.Daily.PrecipitationProbabilityMax, i)),
+                    Num(payload.Daily.UvIndexMax, i),
+                    Clock(Str(payload.Daily.Sunrise, i)),
+                    Clock(Str(payload.Daily.Sunset, i)),
+                    Num(payload.Daily.WindSpeedMax, i),
+                    Num(payload.Daily.PrecipitationSum, i)));
+            }
+        }
+
+        var today = days.Count > 0 ? days[0] : null;
 
         return new WeatherSnapshot
         {
             HasData = true,
             Place = place,
+            IsDay = current.IsDay != 0,
+
             Temperature = current.Temperature,
+            ApparentTemperature = current.Apparent,
+            Humidity = current.Humidity,
+            DewPoint = Num(payload.Hourly?.DewPoint, hourStart),
+            Pressure = current.Pressure,
+            CloudCover = current.CloudCover,
+            Visibility = Num(payload.Hourly?.Visibility, hourStart),
+            WindSpeed = current.WindSpeed,
+            WindGust = current.WindGust,
+            WindDirection = current.WindDirection,
+            Precipitation = current.Precipitation,
+            PrecipProbabilityNow = hours.Count > 0 ? hours[0].PrecipProbability : 0,
             Code = current.WeatherCode,
+
+            TodayMax = today?.Max ?? current.Temperature,
+            TodayMin = today?.Min ?? current.Temperature,
+            TodayApparentMax = Num(payload.Daily?.ApparentMax, 0),
+            TodayApparentMin = Num(payload.Daily?.ApparentMin, 0),
+            PrecipProbability = today?.PrecipProbability ?? 0,
+            PrecipSum = today?.PrecipSum ?? 0,
+            UvIndexMax = today?.UvIndex ?? 0,
+            Sunrise = today?.Sunrise ?? "",
+            Sunset = today?.Sunset ?? "",
+            Daylight = Duration(Num(payload.Daily?.DaylightDuration, 0)),
+
+            Air = air,
+            Hours = hours,
             Days = days,
             UpdatedAt = DateTimeOffset.Now,
         };
+    }
+
+    /// <summary>空气质量接口（独立域名）。拿不到就返回 null，主数据照常显示。</summary>
+    private async Task<AirQuality?> TryFetchAirAsync(
+        double latitude, double longitude, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var url = string.Format(CultureInfo.InvariantCulture,
+                "{0}?latitude={1:0.####}&longitude={2:0.####}&current=pm2_5,pm10,us_aqi,european_aqi&timezone=auto",
+                AirEndpoint, latitude, longitude);
+
+            var payload = await GetJsonAsync<AirResponse>(url, cancellationToken).ConfigureAwait(false);
+            var current = payload?.Current;
+            if (current is null) return null;
+
+            return new AirQuality(
+                current.Pm25 ?? 0,
+                current.Pm10 ?? 0,
+                current.UsAqi ?? 0,
+                current.EuropeanAqi ?? 0);
+        }
+        catch (Exception)
+        {
+            // 空气质量只是锦上添花：失败了不留痕迹，卡片上显示「--」
+            return null;
+        }
     }
 
     private async Task<(double Latitude, double Longitude, string Place)> ResolveAsync(
@@ -226,11 +429,71 @@ public sealed class WeatherService : IDisposable
         return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions, cancellationToken).ConfigureAwait(false);
     }
 
-    private static double At(List<double>? values, int index)
-        => values is not null && index < values.Count ? values[index] : 0;
+    // ---------------------------------------------------------------- 取值 / 格式化
 
-    private static int At(List<int>? values, int index)
-        => values is not null && index < values.Count ? values[index] : 0;
+    /// <summary>找到"当前所在的整点"在逐小时数组里的下标（数组从今天 00:00 起）。</summary>
+    private static int FindCurrentHour(List<string?>? times)
+    {
+        if (times is null || times.Count == 0) return 0;
+
+        var now = DateTime.Now;
+        for (var i = 0; i < times.Count; i++)
+        {
+            if (times[i] is not { Length: > 0 } text) continue;
+            if (!DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var stamp)) continue;
+
+            // 这一格覆盖 [stamp, stamp+1h)：结束时刻晚于现在，就是当前这一格
+            if (stamp.AddHours(1) > now) return i;
+        }
+
+        return 0;
+    }
+
+    private static double Num(List<double?>? values, int index)
+        => values is not null && index >= 0 && index < values.Count ? values[index] ?? 0 : 0;
+
+    private static int Int(List<int?>? values, int index)
+        => values is not null && index >= 0 && index < values.Count ? values[index] ?? 0 : 0;
+
+    private static string Str(List<string?>? values, int index)
+        => values is not null && index >= 0 && index < values.Count ? values[index] ?? "" : "";
+
+    /// <summary>"2026-09-24T06:12" → "06:12"。</summary>
+    private static string Clock(string iso)
+        => iso.Length >= 16 ? iso.Substring(11, 5) : "--:--";
+
+    private static string HourLabel(string? iso, int offset)
+    {
+        if (offset == 0) return "现在";
+        return iso is { Length: >= 16 } ? iso.Substring(11, 5) : "--:--";
+    }
+
+    private static string DayLabel(int index, string? iso) => index switch
+    {
+        0 => "今天",
+        1 => "明天",
+        2 => "后天",
+        _ => WeekdayLabel(iso),
+    };
+
+    private static string WeekdayLabel(string? iso)
+    {
+        if (iso is { Length: >= 10 }
+            && DateTime.TryParse(iso, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+        {
+            return Weekdays[(int)date.DayOfWeek];
+        }
+
+        return "";
+    }
+
+    /// <summary>秒 → "12 小时 34 分"。</summary>
+    private static string Duration(double seconds)
+    {
+        if (seconds <= 0) return "";
+        var span = TimeSpan.FromSeconds(seconds);
+        return $"{(int)span.TotalHours} 小时 {span.Minutes} 分";
+    }
 
     private static string Describe(Exception ex) => ex switch
     {
@@ -238,6 +501,8 @@ public sealed class WeatherService : IDisposable
         TaskCanceledException => "请求超时",
         _ => ex.Message,
     };
+
+    // ---------------------------------------------------------------- JSON 模型
 
     private sealed class GeoResponse
     {
@@ -254,20 +519,65 @@ public sealed class WeatherService : IDisposable
     private sealed class ForecastResponse
     {
         [JsonPropertyName("current")] public CurrentBlock? Current { get; set; }
+        [JsonPropertyName("hourly")] public HourlyBlock? Hourly { get; set; }
         [JsonPropertyName("daily")] public DailyBlock? Daily { get; set; }
     }
 
     private sealed class CurrentBlock
     {
         [JsonPropertyName("temperature_2m")] public double Temperature { get; set; }
+        [JsonPropertyName("relative_humidity_2m")] public double Humidity { get; set; }
+        [JsonPropertyName("apparent_temperature")] public double Apparent { get; set; }
+        [JsonPropertyName("is_day")] public int IsDay { get; set; } = 1;
+        [JsonPropertyName("precipitation")] public double Precipitation { get; set; }
         [JsonPropertyName("weather_code")] public int WeatherCode { get; set; }
+        [JsonPropertyName("cloud_cover")] public double CloudCover { get; set; }
+        [JsonPropertyName("surface_pressure")] public double Pressure { get; set; }
+        [JsonPropertyName("wind_speed_10m")] public double WindSpeed { get; set; }
+        [JsonPropertyName("wind_direction_10m")] public double WindDirection { get; set; }
+        [JsonPropertyName("wind_gusts_10m")] public double WindGust { get; set; }
+    }
+
+    private sealed class HourlyBlock
+    {
+        [JsonPropertyName("time")] public List<string?>? Time { get; set; }
+        [JsonPropertyName("temperature_2m")] public List<double?>? Temperature { get; set; }
+        [JsonPropertyName("weather_code")] public List<int?>? WeatherCode { get; set; }
+        [JsonPropertyName("precipitation_probability")] public List<double?>? PrecipitationProbability { get; set; }
+        [JsonPropertyName("dew_point_2m")] public List<double?>? DewPoint { get; set; }
+        [JsonPropertyName("visibility")] public List<double?>? Visibility { get; set; }
+        [JsonPropertyName("uv_index")] public List<double?>? UvIndex { get; set; }
+        [JsonPropertyName("wind_speed_10m")] public List<double?>? WindSpeed { get; set; }
+        [JsonPropertyName("is_day")] public List<int?>? IsDay { get; set; }
     }
 
     private sealed class DailyBlock
     {
-        [JsonPropertyName("time")] public List<string>? Time { get; set; }
-        [JsonPropertyName("weather_code")] public List<int>? WeatherCode { get; set; }
-        [JsonPropertyName("temperature_2m_max")] public List<double>? TemperatureMax { get; set; }
-        [JsonPropertyName("temperature_2m_min")] public List<double>? TemperatureMin { get; set; }
+        [JsonPropertyName("time")] public List<string?>? Time { get; set; }
+        [JsonPropertyName("weather_code")] public List<int?>? WeatherCode { get; set; }
+        [JsonPropertyName("temperature_2m_max")] public List<double?>? TemperatureMax { get; set; }
+        [JsonPropertyName("temperature_2m_min")] public List<double?>? TemperatureMin { get; set; }
+        [JsonPropertyName("apparent_temperature_max")] public List<double?>? ApparentMax { get; set; }
+        [JsonPropertyName("apparent_temperature_min")] public List<double?>? ApparentMin { get; set; }
+        [JsonPropertyName("precipitation_probability_max")] public List<double?>? PrecipitationProbabilityMax { get; set; }
+        [JsonPropertyName("precipitation_sum")] public List<double?>? PrecipitationSum { get; set; }
+        [JsonPropertyName("uv_index_max")] public List<double?>? UvIndexMax { get; set; }
+        [JsonPropertyName("sunrise")] public List<string?>? Sunrise { get; set; }
+        [JsonPropertyName("sunset")] public List<string?>? Sunset { get; set; }
+        [JsonPropertyName("daylight_duration")] public List<double?>? DaylightDuration { get; set; }
+        [JsonPropertyName("wind_speed_10m_max")] public List<double?>? WindSpeedMax { get; set; }
+    }
+
+    private sealed class AirResponse
+    {
+        [JsonPropertyName("current")] public AirCurrent? Current { get; set; }
+    }
+
+    private sealed class AirCurrent
+    {
+        [JsonPropertyName("pm2_5")] public double? Pm25 { get; set; }
+        [JsonPropertyName("pm10")] public double? Pm10 { get; set; }
+        [JsonPropertyName("us_aqi")] public double? UsAqi { get; set; }
+        [JsonPropertyName("european_aqi")] public double? EuropeanAqi { get; set; }
     }
 }
