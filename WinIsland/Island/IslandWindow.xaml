@@ -51,11 +51,12 @@
                         Opacity="0" />
                 </Grid>
             </Border>
-            <StackPanel
+            <!-- 展开队列：一列放满 QueueCardsPerColumn 张就换到右边一列（行列定义与间距都按
+                 IslandWindow 里的常量在 BuildQueue 中重建），所以这里只留一个空网格。 -->
+            <Grid
                 x:Name="QueuePanel"
                 Grid.Row="1"
                 HorizontalAlignment="Center"
-                Spacing="6"
                 Visibility="Collapsed" />
         </Grid>
     </Grid>

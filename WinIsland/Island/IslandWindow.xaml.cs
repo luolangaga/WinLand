@@ -20,14 +20,22 @@ namespace WinIsland.Island;
 /// <summary>
 /// 灵动岛悬浮窗：无边框、透明、置顶、不抢焦点。
 /// 状态机：空闲 → 紧凑 → 展开 → 临时消息。
-/// 小岛时只展示优先级最高的一个活动；展开时所有活动
-/// 按大岛样式从上到下排列，每个都是完整的 MorphView 大岛。
+/// 小岛时只展示优先级最高的一个活动；展开时其余活动按大岛样式排在主岛下方，
+/// 一列放满就换到右边一列，每个都是完整的 MorphView 大岛。
 /// </summary>
 public sealed partial class IslandWindow : Window
 {
     private const double Pad = 24;
+    /// <summary>岛体与展开队列之间的间距（与 XAML 里 IslandStack 的 RowSpacing 一致）。</summary>
     private const double QueueSpacing = 8;
-    private const int MaxExpandedItems = 4;
+    /// <summary>展开队列每列最多几张卡片：放满就换到右边一列。</summary>
+    private const int QueueCardsPerColumn = 3;
+    /// <summary>展开队列的列数上限：三列共九张卡，是常见屏幕放得下的上限。</summary>
+    private const int MaxQueueColumns = 3;
+    /// <summary>展开时最多渲染的队列卡片数（主岛之外的那部分）。</summary>
+    private const int MaxQueueCards = QueueCardsPerColumn * MaxQueueColumns;
+    /// <summary>队列卡片之间的间距（同列上下 / 相邻两列）。</summary>
+    private const double QueueCardGap = 6;
     private static readonly Size IdleSize = new(128, 34);
     private static readonly TimeSpan ExpandDuration = TimeSpan.FromMilliseconds(333);
     private static readonly TimeSpan CollapseDuration = TimeSpan.FromMilliseconds(250);
@@ -627,18 +635,32 @@ public sealed partial class IslandWindow : Window
         var queue = QueueItems;
         if (expanded && queue.Count > 0)
         {
-            int count = Math.Min(queue.Count, MaxExpandedItems - 1);
-            return new Size(main.Width, main.Height + count * (QueueCardHeight() + QueueSpacing));
+            // 队列换行成多列：宽度按列数摊开，高度只算一列的行数（主岛自己仍只有一列宽）
+            int count = Math.Min(queue.Count, MaxQueueCards);
+            int columns = QueueColumnCount(count);
+            int rows = QueueRowCount(count);
+            double width = Math.Max(main.Width, columns * StackWidth() + (columns - 1) * QueueCardGap);
+            double height = main.Height + QueueSpacing
+                            + rows * QueueCardHeight() + (rows - 1) * QueueCardGap;
+            return new Size(width, height);
         }
 
         return main;
     }
 
+    /// <summary>展开队列渲染的列数：每列 <see cref="QueueCardsPerColumn"/> 张，放满换到右边一列。</summary>
+    private static int QueueColumnCount(int count)
+        => (count + QueueCardsPerColumn - 1) / QueueCardsPerColumn;
+
+    /// <summary>展开队列的列高（行数）：最多 <see cref="QueueCardsPerColumn"/> 行。</summary>
+    private static int QueueRowCount(int count)
+        => Math.Min(count, QueueCardsPerColumn);
+
     /// <summary>展开态主岛尺寸：高度由活动自己决定，宽度统一到栈宽（与卡片边缘对齐）。</summary>
     private Size ExpandedMainSize()
         => new(StackWidth(), ActiveLive?.ExpandedSize.Height ?? IdleSize.Height);
 
-    /// <summary>展开态的统一宽度：主岛与所有队列卡片取最大展开宽度，整列边缘对齐。</summary>
+    /// <summary>展开态的统一宽度：主岛与所有队列卡片（跨列也一样）取最大展开宽度，边缘对齐。</summary>
     private double StackWidth()
     {
         double width = ActiveLive?.ExpandedSize.Width ?? IdleSize.Width;
@@ -649,11 +671,11 @@ public sealed partial class IslandWindow : Window
         return width;
     }
 
-    /// <summary>队列卡片的统一高度：取展示出来的卡片里最高的一张，保证每张卡片一样大。</summary>
+    /// <summary>队列卡片的统一高度：取展示出来的卡片里最高的一张，保证每张卡片一样大（跨列也一样）。</summary>
     private double QueueCardHeight()
     {
         var queue = QueueItems;
-        int count = Math.Min(queue.Count, MaxExpandedItems - 1);
+        int count = Math.Min(queue.Count, MaxQueueCards);
         double height = 0;
         for (int i = 0; i < count; i++)
         {
@@ -781,7 +803,7 @@ public sealed partial class IslandWindow : Window
         }
     }
 
-    /// <summary>构建队列：每个队列活动一张卡片，所有卡片统一尺寸（同宽同高）。</summary>
+    /// <summary>构建队列：每个队列活动一张卡片，所有卡片统一尺寸（同宽同高），一列放满就换到右边一列。</summary>
     private void BuildQueue()
     {
         // 活动顺序可能刚变过（优先级调整）：先按各自记录的视图安全拆掉旧卡片，再重建
@@ -798,11 +820,25 @@ public sealed partial class IslandWindow : Window
         double cardWidth = StackWidth();
         double cardHeight = QueueCardHeight();
 
-        // 底部模式下队列朝岛体上方排列：反向添加，使最先入队的活动仍最靠近岛体
-        int count = Math.Min(queue.Count, MaxExpandedItems - 1);
-        for (int n = 0; n < count; n++)
+        int count = Math.Min(queue.Count, MaxQueueCards);
+        int columns = QueueColumnCount(count);
+
+        // 队列网格：行数固定为列高，列数按当前卡片数一次性给足（旧卡片已在 TeardownQueue 里清空）
+        QueuePanel.RowSpacing = QueueCardGap;
+        QueuePanel.ColumnSpacing = QueueCardGap;
+        QueuePanel.RowDefinitions.Clear();
+        for (int r = 0; r < QueueCardsPerColumn; r++)
         {
-            int i = _bottomAnchored ? count - 1 - n : n;
+            QueuePanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        }
+        QueuePanel.ColumnDefinitions.Clear();
+        for (int c = 0; c < columns; c++)
+        {
+            QueuePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        }
+
+        for (int i = 0; i < count; i++)
+        {
             var item = queue[i];
             var content = item.Content;
 
@@ -847,6 +883,13 @@ public sealed partial class IslandWindow : Window
                     }
                 };
             }
+
+            // 列内自下而上（底部模式）/ 自上而下（顶部模式）填：最先入队的活动永远离岛体最近
+            int column = i / QueueCardsPerColumn;
+            int slot = i % QueueCardsPerColumn;
+            int inColumn = Math.Min(QueueCardsPerColumn, count - column * QueueCardsPerColumn);
+            Grid.SetColumn(surface.Border, column);
+            Grid.SetRow(surface.Border, _bottomAnchored ? inColumn - 1 - slot : slot);
 
             QueuePanel.Children.Add(surface.Border);
             _queueSurfaces.Add(surface);
@@ -1781,7 +1824,7 @@ public sealed partial class IslandWindow : Window
         if (_windowPhysW <= 0 || _windowPhysH <= 0) return;
 
         var s = Scale;
-        var rects = new List<ShapeRect>(MaxExpandedItems);
+        var rects = new List<ShapeRect>(MaxQueueCards + 1);
 
         // 主岛（空闲 / 活动 / 临时消息都走这里）：形状必须与岛体「当前渲染尺寸」严格一致。
         // 绝不能取动画目标尺寸 —— 目标比内容多出来的那一圈会落进形状里，
