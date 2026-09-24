@@ -16,6 +16,11 @@ on:
         required: false
         type: boolean
         default: false
+      refresh_notes:
+        description: '只刷新发布说明（更新日志 + SHA256），不重新上传安装包'
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       tag:
@@ -24,6 +29,11 @@ on:
         type: string
       prerelease:
         description: '在 GitCode 上标为预发布'
+        required: false
+        type: boolean
+        default: false
+      refresh_notes:
+        description: '只刷新发布说明（更新日志 + SHA256），不重新上传安装包'
         required: false
         type: boolean
         default: false
@@ -95,6 +105,10 @@ jobs:
             STATUS=latest
           fi
 
+          # GitHub Release 的正文（更新日志）原样带去 GitCode：国内镜像下载的人也能直接看到这一版改了什么
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.body // ""' > release_body.md
+          echo "更新日志 $(wc -c < release_body.md) 字节"
+
           echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
           echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
           echo "Release ${TAG}：id=${RELEASE_ID}，GitHub prerelease=${PRERELEASE} → GitCode release_status=${STATUS}"
@@ -123,15 +137,19 @@ jobs:
 
           ls -lh release_files
 
-      # 安装包哈希直接写进 GitCode 的发布说明，下载的人可以自己核对
-      - name: 计算 SHA256
+      # 发布说明 = 镜像提示 + GitHub 正文（更新日志）+ 安装包哈希
+      - name: 组装发布说明
         if: steps.token.outputs.skip != 'true'
         run: |
           set -euo pipefail
           cd release_files
           {
-            echo "国内镜像。完整发布说明见 GitHub：https://github.com/${GITHUB_REPOSITORY}/releases/tag/${{ inputs.tag }}"
+            echo "> 国内镜像。完整发布说明见 GitHub：https://github.com/${GITHUB_REPOSITORY}/releases/tag/${{ inputs.tag }}"
             echo
+            if [ -s ../release_body.md ]; then
+              cat ../release_body.md
+              echo
+            fi
             echo "## SHA256 校验值"
             echo
             echo "| 文件 | SHA256 |"
@@ -140,8 +158,8 @@ jobs:
               [ -f "$f" ] || continue
               echo "| \`$f\` | \`$(sha256sum "$f" | awk '{print $1}')\` |"
             done
-          } > ../hash_table.md
-          cat ../hash_table.md
+          } > ../release_notes.md
+          cat ../release_notes.md
 
       - name: 创建或更新 GitCode Release
         if: steps.token.outputs.skip != 'true'
@@ -159,7 +177,7 @@ jobs:
           tag = os.environ["TAG"]
           token = os.environ["GITCODE_ACCESS_TOKEN"]
 
-          with open("hash_table.md", encoding="utf-8") as handle:
+          with open("release_notes.md", encoding="utf-8") as handle:
               body = handle.read()
 
           payload = {
@@ -192,8 +210,9 @@ jobs:
                   print(f"::warning::更新 GitCode Release 失败（HTTP {update_error.code}）：{detail}")
           PY
 
+      # refresh_notes 只换发布说明：安装包已经传过就不必再传一遍，免得 GitCode 上出现重复附件
       - name: 上传安装包到 GitCode
-        if: steps.token.outputs.skip != 'true'
+        if: steps.token.outputs.skip != 'true' && inputs.refresh_notes != true
         env:
           TAG: ${{ inputs.tag }}
         run: |

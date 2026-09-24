@@ -125,6 +125,9 @@ jobs:
     needs: [prepare, build]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    # 这个 job 不 checkout，gh 自己认不出仓库（会报 not a git repository），得显式喂给它
+    env:
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: 下载安装包
         uses: actions/download-artifact@v4

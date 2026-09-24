@@ -47,7 +47,7 @@
 
 ### 功能亮点
 
-* **两种形态** —— 紧凑胶囊 ↔ 悬停展开（主岛 + 最多 3 张队列卡片），展开/收起带形变动画
+* **两种形态** —— 紧凑胶囊 ↔ 悬停展开（主岛 + 最多 9 张队列卡片：每列 3 张、最多 3 列，放满换列），展开/收起带形变动画
 * **文件投放** —— 把文件/文件夹、文本、图片拖到岛上：岛展开成一排投放卡片（拖到两端自动滚动、悬停放大、系统气泡提示「投放到 XXX」，摘要按载荷显示文件名 / 文本预览 / 图片缩略图），松手即执行；卡片可由插件注册
 * **两种外观** —— Apple 纯黑胶囊，或带系统材质（Acrylic / Mica）的 Windows Fluent
 * **两种摆放** —— 贴屏幕顶部悬浮，或真·嵌进任务栏条带（自动避开任务栏图标、跟随自动隐藏、被压住时自愈置顶）
@@ -227,6 +227,8 @@ pwsh tools/pack-plugin.ps1 -ProjectDir samples\HelloPlugin
 | [`samples/HelloPlugin`](samples/HelloPlugin) | 代码构建 UI、私有依赖、设置页、定时器、完整清理 |
 | [`samples/XamlPlugin`](samples/XamlPlugin) | XAML 视图 + `PluginXaml.Load` + 逐帧形变动画 |
 | [`samples/HardwareMonitor`](samples/HardwareMonitor) | 真实功能插件：CPU / GPU / 网络 / 帧率，自带 NuGet 依赖 |
+| [`samples/WeatherIsland`](samples/WeatherIsland) | 网络数据 + 定时刷新 + 主题适配 + 「超级展开」聚光卡 |
+| [`samples/DeviceIsland`](samples/DeviceIsland) | 设备热插拔监听（Win32 / Core Audio / PnP 属性）、多条目列表与逐条操作 |
 
 ---
 
