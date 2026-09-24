@@ -110,7 +110,7 @@ Dispose/卸载 → Unloading → 程序集请求卸载并验证回收
 | `Settings` | **作用域化**设置存储，键自动加 `<id>.` 前缀（`Settings.Set("enabled", true)` → `hw-monitor.enabled`） |
 | `Island.SetContent(content)` | 注册常驻内容（`null` 取消）。owner 由宿主绑定为插件 Id |
 | `Island.OpenSpotlight(spotlight)` / `Island.CloseSpotlight()` | 打开 / 收起「超级展开」聚光卡（见下方同名小节） |
-| `Island.ShowMessage(msg)` | 临时消息（标题 + 正文 + 图标 + 时长） |
+| `Island.ShowMessage(msg)` | 临时消息（标题 + 正文 + 图标 + 时长）。宽度跟随内容（152..340）、有正文时是 46 高的小卡；不给 `AccentColor` 时用与空闲点同色的中性图标芯片，而不是默认蓝色 |
 | `Island.Show(uiElement, size, duration)` | 临时展示任意控件 |
 | `Island.AddSettingsPage(desc)` | 注册设置页（停用时自动移除） |
 | `Island.AddDropTarget(target)` | 注册文件投放目标：拖文件到岛上时的一排卡片（见下方「文件投放」小节；停用时自动移除） |
