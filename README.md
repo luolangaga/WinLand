@@ -1,5 +1,3 @@
-# 该项目正在开发中！
-
 <div align="center">
   <img src="docs/images/banner.png" width="880" alt="WinIsland — 给 Windows 的灵动岛">
 </div>
