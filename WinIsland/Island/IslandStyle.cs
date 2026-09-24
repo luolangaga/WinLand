@@ -140,4 +140,71 @@ public static class IslandStyle
     /// <summary>聚光卡描边：两种风格都用 1px 浅色描边，把卡片从暗化遮罩里"抠"出来。</summary>
     public static SolidColorBrush CreateSpotlightStroke(IslandStyleKind style)
         => new(SpotlightStroke);
+
+    // ---- 临时消息（岛体内部的反馈条，不参与点击形状，但圆角与配色必须和岛体同一套规则）----
+
+    /// <summary>
+    /// 临时内容高过这个值就按"卡片"取圆角，而不是按"胶囊"。
+    /// 一行消息 40 高、圆角取高度一半是颗胶囊；两行正文的高卡再用高度一半就成了跑道形，不像卡片。
+    /// </summary>
+    public const double MessageCardHeight = 44;
+
+    private const double AppleMessageChipRadius = 8;
+    private const double FluentMessageChipRadius = 6;
+    private static readonly Color AppleMessageChipFill = Color.FromArgb(255, 46, 46, 50);   // 与空闲点同色：没有强调色时的中性芯片
+    private static readonly Color FluentMessageChipFill = Color.FromArgb(30, 255, 255, 255);
+    private static readonly Color MessageChipStroke = Color.FromArgb(38, 255, 255, 255);
+    private static readonly Color MessageTitleColor = Color.FromArgb(255, 255, 255, 255);
+    private static readonly Color MessageTextColor = Color.FromArgb(152, 255, 255, 255);
+
+    /// <summary>消息图标芯片圆角。</summary>
+    public static double ResolveMessageChipRadius(IslandStyleKind style, double chipSize)
+        => Math.Min(style == IslandStyleKind.Fluent ? FluentMessageChipRadius : AppleMessageChipRadius, chipSize / 2);
+
+    /// <summary>
+    /// 消息图标芯片底色：插件给了强调色就用它（消息的身份色），没给就用中性芯片 ——
+    /// 宿主自己的消息（启动提示、更新提示、投放反馈）因此不会平白冒出一个蓝色圆点。
+    /// </summary>
+    public static SolidColorBrush CreateMessageChipFill(IslandStyleKind style, Color? accent)
+        => accent is { } color
+            ? new SolidColorBrush(color)
+            : new SolidColorBrush(style == IslandStyleKind.Fluent ? FluentMessageChipFill : AppleMessageChipFill);
+
+    /// <summary>消息图标芯片描边：仅 Fluent，和岛体描边、投放卡片描边同一档。</summary>
+    public static SolidColorBrush? CreateMessageChipStroke(IslandStyleKind style)
+        => style == IslandStyleKind.Fluent ? new SolidColorBrush(MessageChipStroke) : null;
+
+    /// <summary>消息标题色：近纯白（两种底衬上都要顶得住）。</summary>
+    public static SolidColorBrush CreateMessageTitleBrush() => new(MessageTitleColor);
+
+    /// <summary>消息正文色：六成白，比标题低一档，两行排在一起才有主次。</summary>
+    public static SolidColorBrush CreateMessageTextBrush() => new(MessageTextColor);
+
+    // ---- 文件投放卡片（岛体内部的小卡片，不参与点击形状，但圆角与配色必须和岛体同一套规则）----
+
+    private const double AppleDropTileRadius = 16;
+    private const double FluentDropTileRadius = 8;
+    private static readonly Color AppleDropTileFill = Color.FromArgb(20, 255, 255, 255);
+    private static readonly Color FluentDropTileFill = Color.FromArgb(26, 255, 255, 255);
+    private static readonly Color DropTileStroke = Color.FromArgb(20, 255, 255, 255);
+    private static readonly Color DropTileNeutralHighlight = Color.FromArgb(51, 255, 255, 255);
+
+    /// <summary>投放卡片圆角。</summary>
+    public static double ResolveDropTileRadius(IslandStyleKind style, double tileHeight)
+        => Math.Min(style == IslandStyleKind.Fluent ? FluentDropTileRadius : AppleDropTileRadius, tileHeight / 2);
+
+    /// <summary>投放卡片底色：黑胶囊上用一档很浅的白（Apple），材质上稍亮一点（Fluent）。</summary>
+    public static SolidColorBrush CreateDropTileFill(IslandStyleKind style, bool materialApplied)
+        => new(style == IslandStyleKind.Apple ? AppleDropTileFill : FluentDropTileFill);
+
+    /// <summary>投放卡片描边：仅 Fluent 使用，和岛体描边同一档。</summary>
+    public static SolidColorBrush? CreateDropTileStroke(IslandStyleKind style)
+        => style == IslandStyleKind.Fluent ? new SolidColorBrush(DropTileStroke) : null;
+
+    /// <summary>投放卡片高亮层：有强调色就用强调色（保留 40% 透出底色），没有就用中性白 20%。</summary>
+    public static SolidColorBrush CreateDropTileHighlight(IslandStyleKind style, Color? accent)
+    {
+        if (accent is not { } color) return new SolidColorBrush(DropTileNeutralHighlight);
+        return new SolidColorBrush(Color.FromArgb(102, color.R, color.G, color.B));
+    }
 }

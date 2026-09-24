@@ -8,7 +8,9 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Shapes;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
+using Windows.Storage.Streams;
 using WinIsland.Core;
 using WinIsland.Core.Plugins;
 
@@ -29,7 +31,8 @@ public sealed partial class IslandWindow : Window
     private static readonly TimeSpan ExpandDuration = TimeSpan.FromMilliseconds(333);
     private static readonly TimeSpan CollapseDuration = TimeSpan.FromMilliseconds(250);
     private const double MinCanvasWidth = 420;
-    private static readonly Size MaxMessageSize = new(280, 40);
+    /// <summary>临时内容（消息 / 插件自定义内容）的尺寸 morph：比悬停展开略长一点，与内容交接同拍落地。</summary>
+    private static readonly TimeSpan TemporaryMorphDuration = TimeSpan.FromMilliseconds(280);
 
     // 位置（island.position / island.horizontal / 两条偏移）
     private const string PositionKey = "island.position";
@@ -42,6 +45,8 @@ public sealed partial class IslandWindow : Window
     private const string TopOffsetKey = "island.topOffset";
     private const string BottomOffsetKey = "island.bottomOffset";
     private const string HorizontalOffsetKey = "island.horizontalOffset";
+    /// <summary>文件投放总开关（默认开）。关掉后岛对文件拖放完全无感。</summary>
+    private const string DropEnabledKey = "island.dropEnabled";
     private const double DefaultOffset = 6.0;
     /// <summary>靠左/靠右时距条带（或工作区）边缘的间距。Win11 图标居中排列，任务栏左端通常是空的。</summary>
     private const double EdgeInset = 12;
@@ -103,6 +108,12 @@ public sealed partial class IslandWindow : Window
     private Storyboard? _sizeStoryboard;
     private int _animVersion;
     private readonly RectangleGeometry _clip = new();
+
+    // 内容交接（换内容时旧内容淡出、新内容稍后淡入）：见 SwapContent
+    private Storyboard? _contentSwap;
+    private int _contentSwapVersion;
+    private readonly CompositeTransform _contentSlide = new();
+    private readonly CompositeTransform _leavingSlide = new();
 
     // 外观风格（island.style / island.material）：材质、底衬、描边、圆角与空闲点颜色都由它决定
     private readonly IslandSurface _mainSurface;
@@ -176,6 +187,12 @@ public sealed partial class IslandWindow : Window
 
         _mainSurface = new IslandSurface(IslandRoot, ContentHost);
 
+        // 内容交接用的位移/缩放（只动组合级属性，和尺寸 morph 逐帧共存）
+        ContentHost.RenderTransform = _contentSlide;
+        ContentHost.RenderTransformOrigin = new Point(0.5, 0.5);
+        ContentLeaving.RenderTransform = _leavingSlide;
+        ContentLeaving.RenderTransformOrigin = new Point(0.5, 0.5);
+
         AppWindow.IsShownInSwitchers = false;
         _presenter = OverlappedPresenter.Create();
         _presenter.SetBorderAndTitleBar(false, false);
@@ -231,6 +248,17 @@ public sealed partial class IslandWindow : Window
         _hoverGuard.IsRepeating = true;
         _hoverGuard.Tick += (_, _) => HoverGuardTick();
 
+        // 投放面板：边缘自动滚动（16ms 推进一次）与离开岛体后的宽限收起
+        _dropScroll = DispatcherQueue.CreateTimer();
+        _dropScroll.Interval = TimeSpan.FromMilliseconds(DropScrollTickMs);
+        _dropScroll.IsRepeating = true;
+        _dropScroll.Tick += (_, _) => DropScrollTick();
+
+        _dropExitGrace = DispatcherQueue.CreateTimer();
+        _dropExitGrace.Interval = TimeSpan.FromMilliseconds(DropExitGraceMs);
+        _dropExitGrace.IsRepeating = false;
+        _dropExitGrace.Tick += (_, _) => EndDropSession();
+
         _settings.Changed += OnSettingChanged;
         Closed += (_, _) =>
         {
@@ -238,6 +266,8 @@ public sealed partial class IslandWindow : Window
             _positionSlide = null;
             _watchdog?.Stop();
             _watchdog = null;
+            _dropScroll.Stop();
+            _dropExitGrace.Stop();
             _backdrop?.Dispose();
         };
 
@@ -247,6 +277,7 @@ public sealed partial class IslandWindow : Window
         ContentHost.Content = _idleContent;
         ApplyPositionMode();
         ApplyStyle();
+        ApplyDropSetting();
         EnsureCanvas();
     }
 
@@ -265,7 +296,8 @@ public sealed partial class IslandWindow : Window
         // 内容集合变化时才允许扩容画布，之后悬停展开/收起不再动窗口几何
         EnsureCanvas();
 
-        if (_tempContent != null)
+        // 临时消息与投放面板都占着岛体：到这里只更新活动集合与画布，内容等它们结束再切
+        if (_tempContent != null || _dropping)
         {
             UpdateVisibility();
             return;
@@ -288,10 +320,11 @@ public sealed partial class IslandWindow : Window
         TeardownQueue();
         _expanded = false;
 
-        ContentHost.Content = content;
+        // 内容交接（旧内容淡出 → 新内容淡入）与尺寸 morph 同时开始：两者同拍落地才像"一次换气"
+        SwapContent(content, animate: true);
         EnsureCanvas();
-        AnimateIslandSize(size, CollapseDuration, isTemporary: true);
-        ApplyCornerRadius(size.Height, expanded: false);
+        AnimateIslandSize(size, TemporaryMorphDuration, isTemporary: true);
+        ApplyTemporaryRadius(size.Height);
         UpdateVisibility();
     }
 
@@ -309,17 +342,15 @@ public sealed partial class IslandWindow : Window
 
     public void ShowMessage(IslandMessage msg, string? owner = null)
     {
-        var view = BuildMessageView(msg);
-        const double width = 280;
-        view.Measure(new Size(width, double.PositiveInfinity));
-        var height = Math.Clamp(view.DesiredSize.Height, 36, 40);
-        ShowTemporary(view, new Size(width, height), msg.Duration, owner);
+        var (view, size) = MessageView.Build(msg, _style);
+        ShowTemporary(view, size, msg.Duration, owner);
     }
 
     public void RefreshFromSettings()
     {
         ApplyStyle();
         ApplyPositionMode();
+        ApplyDropSetting();
         UpdateVisibility();
         EnsureCanvas();
         ApplyCanvasBounds();
@@ -367,6 +398,7 @@ public sealed partial class IslandWindow : Window
             _shown = false;
             TeardownQueue();
             _expanded = false;
+            ClearDropSession();
             ClearTouchExpand();
             FadeIslandOpacity(0, SpotlightFadeOutMs, () =>
             {
@@ -396,9 +428,10 @@ public sealed partial class IslandWindow : Window
     {
         if (_tempContent != null)
         {
-            ContentHost.Content = _tempContent;
-            AnimateIslandSize(_tempSize, CollapseDuration, isTemporary: true);
-            ApplyCornerRadius(_tempSize.Height, expanded: false);
+            // 岛体整块正在淡入，内容层直接就位（再套一层内容交接会变成两段淡入叠在一起）
+            SetContentImmediate(_tempContent);
+            AnimateIslandSize(_tempSize, TemporaryMorphDuration, isTemporary: true);
+            ApplyTemporaryRadius(_tempSize.Height);
             return;
         }
 
@@ -572,8 +605,8 @@ public sealed partial class IslandWindow : Window
     /// </summary>
     private Size ComputeCanvasFootprint()
     {
-        double w = Math.Max(MinCanvasWidth, Math.Max(IdleSize.Width, MaxMessageSize.Width));
-        double h = Math.Max(IdleSize.Height, MaxMessageSize.Height);
+        double w = Math.Max(MinCanvasWidth, Math.Max(IdleSize.Width, MessageView.MaxSize.Width));
+        double h = Math.Max(IdleSize.Height, MessageView.MaxSize.Height);
 
         foreach (var (_, content) in _live)
         {
@@ -584,6 +617,10 @@ public sealed partial class IslandWindow : Window
         var expandedTotal = ComputeTotalSize(expanded: true);
         w = Math.Max(w, expandedTotal.Width);
         h = Math.Max(h, expandedTotal.Height);
+
+        // 投放面板：尺寸是常量，启动时就预留出来 —— 拖拽开始时才扩容会让窗口在 OLE 拖放中途 resize
+        w = Math.Max(w, DropPanelSize.Width);
+        h = Math.Max(h, DropPanelSize.Height);
 
         return new Size(w + Pad * 2, h + Pad * 2);
     }
@@ -603,6 +640,13 @@ public sealed partial class IslandWindow : Window
 
     private void TransitionToLiveState()
     {
+        // 投放会话进行中就切回投放面板：临时消息结束、聚光卡关闭等路径都会走到这里
+        if (_dropping)
+        {
+            ShowDropPanel();
+            return;
+        }
+
         var live = ActiveLive;
         if (live == null)
         {
@@ -610,7 +654,7 @@ public sealed partial class IslandWindow : Window
             // 没有活动内容了，常驻展开没有意义：留着它会让下一个注册的插件凭空自动展开
             ClearTouchExpand();
             TeardownQueue();
-            ContentHost.Content = _idleContent;
+            SwapContent(_idleContent, animate: true);
             AnimateIslandSize(IdleSize, CollapseDuration);
             ApplyCornerRadius(IdleSize.Height, expanded: false);
             return;
@@ -621,8 +665,8 @@ public sealed partial class IslandWindow : Window
 
         if (live.MorphView != null)
         {
-            // 确保 View 在 ContentHost 里
-            ContentHost.Content = live.MorphView.View;
+            // 确保 View 在 ContentHost 里（同一棵树内换位时交接会自动跳过动画）
+            SwapContent(live.MorphView.View, animate: true);
             if (wantExpand)
             {
                 _expanded = true;
@@ -646,7 +690,7 @@ public sealed partial class IslandWindow : Window
             if (wantExpand && live.ExpandedContent != null)
             {
                 _expanded = true;
-                ContentHost.Content = live.ExpandedContent;
+                SwapContent(live.ExpandedContent, animate: true);
                 AnimateIslandSize(ExpandedMainSize(), ExpandDuration);
                 ApplyCornerRadius(live.ExpandedSize.Height, expanded: true);
                 BuildQueue();
@@ -655,7 +699,7 @@ public sealed partial class IslandWindow : Window
             {
                 _expanded = false;
                 TeardownQueue();
-                ContentHost.Content = live.CompactContent ?? _idleContent;
+                SwapContent(live.CompactContent ?? _idleContent, animate: true);
                 Size compact = CompactSizeOf(live);
                 AnimateIslandSize(compact, CollapseDuration);
                 ApplyCornerRadius(compact.Height, expanded: false);
@@ -769,11 +813,14 @@ public sealed partial class IslandWindow : Window
         QueuePanel.Children.Clear();
         QueuePanel.Visibility = Visibility.Collapsed;
 
-        // 确保主活动的 View 在 ContentHost 里（可能被队列 Border 占用过）
+        // 确保主活动的 View 在 ContentHost 里（可能被队列 Border 占用过）。
+        // 临时消息/投放面板占着岛体时不动内容层：那时 ContentHost 里是消息，
+        // 换成插件视图会让紧随其后的交接动画从错误的内容起步（屏幕上会闪一下插件视图）。
         var live = ActiveLive;
-        if (live?.MorphView != null && !ReferenceEquals(ContentHost.Content, live.MorphView.View))
+        if (_tempContent == null && !_dropping
+            && live?.MorphView != null && !ReferenceEquals(ContentHost.Content, live.MorphView.View))
         {
-            ContentHost.Content = live.MorphView.View;
+            SetContentImmediate(live.MorphView.View);
         }
 
         UpdateHitRegion(force: true);
@@ -850,7 +897,7 @@ public sealed partial class IslandWindow : Window
     /// <summary>展开岛体。返回是否真的展开了 —— 没有可展开内容时返回 false（调用方据此决定要不要当成一次普通点击）。</summary>
     private bool OnHoverEnter()
     {
-        if (_tempContent != null) return false;
+        if (_tempContent != null || _dropping) return false;
 
         var live = ActiveLive;
         if (live == null) return false;
@@ -867,7 +914,7 @@ public sealed partial class IslandWindow : Window
         }
         else
         {
-            ContentHost.Content = live.ExpandedContent;
+            SwapContent(live.ExpandedContent, animate: true);
             AnimateIslandSize(ExpandedMainSize(), ExpandDuration);
             ApplyCornerRadius(live.ExpandedSize.Height, expanded: true);
         }
@@ -878,7 +925,7 @@ public sealed partial class IslandWindow : Window
 
     private void OnHoverExit()
     {
-        if (_tempContent != null) return;
+        if (_tempContent != null || _dropping) return;
         if (!_expanded) return;
 
         ClearTouchExpand();
@@ -900,7 +947,7 @@ public sealed partial class IslandWindow : Window
         }
         else
         {
-            ContentHost.Content = live.CompactContent ?? _idleContent;
+            SwapContent(live.CompactContent ?? _idleContent, animate: true);
             Size compact = CompactSizeOf(live);
             AnimateIslandSize(compact, CollapseDuration);
             ApplyCornerRadius(compact.Height, expanded: false);
@@ -922,6 +969,13 @@ public sealed partial class IslandWindow : Window
         _radiusExpanded = expanded;
         _mainSurface.SetRadius(IslandStyle.ResolveRadius(_style, height, expanded));
     }
+
+    /// <summary>
+    /// 临时内容（消息 / 插件自定义内容）的圆角档位：高过一条胶囊就按卡片算 ——
+    /// 两行正文的高卡若还用 height/2，两端会圆成跑道形，不像卡片。
+    /// </summary>
+    private void ApplyTemporaryRadius(double height)
+        => ApplyCornerRadius(height, expanded: height > IslandStyle.MessageCardHeight);
 
     private void AnimateIslandSize(Size islandTarget, TimeSpan duration, bool isTemporary = false)
     {
@@ -959,7 +1013,7 @@ public sealed partial class IslandWindow : Window
         var version = ++_animVersion;
 
         var sb = new Storyboard();
-        var easing = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.45 };
+        var easing = SizeEasing(isTemporary, fromH, islandTarget.Height);
         sb.Children.Add(MakeSizeAnim(IslandRoot, "Width", fromW, islandTarget.Width, duration, easing));
         sb.Children.Add(MakeSizeAnim(IslandRoot, "Height", fromH, islandTarget.Height, duration, easing));
 
@@ -976,6 +1030,20 @@ public sealed partial class IslandWindow : Window
     }
 
     private Size _currentTotalSize = IdleSize;
+
+    /// <summary>
+    /// 尺寸动画的缓动。岛体一贯是"回弹"（BackEase EaseOut）；临时内容例外 ——
+    /// 回弹会在**收缩**方向上越过目标：胶囊缩得比目标还矮一截、内容被裁剪框切一刀再弹回来，
+    /// 一条消息这么缩一下很廉价。所以临时内容收缩时用纯 EaseOut（绝不越过目标），
+    /// 只有长大时才留一点点回弹（仍然是一次"弹出来"的入场）。
+    /// </summary>
+    private static EasingFunctionBase SizeEasing(bool temporary, double fromHeight, double toHeight)
+    {
+        if (!temporary) return new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.45 };
+        return toHeight < fromHeight
+            ? new CubicEase { EasingMode = EasingMode.EaseOut }
+            : new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.22 };
+    }
 
     private static DoubleAnimation MakeSizeAnim(
         DependencyObject target, string property,
@@ -1602,7 +1670,8 @@ public sealed partial class IslandWindow : Window
         bool visible = _settings.Get("island.visible", true)
                        && !(_bottomAnchored && _taskbarHidden)
                        && !_spotlightOccluded
-                       && !(hideIdle && ActiveLive == null && _tempContent == null);
+                       // 投放会话期间必须留在屏幕上：用户正拖着文件对着岛
+                       && !(hideIdle && ActiveLive == null && _tempContent == null && !_dropping);
         if (!force && visible == _shown) return;
         _shown = visible;
         if (visible)
@@ -1651,7 +1720,7 @@ public sealed partial class IslandWindow : Window
     private void ApplyPriorityChange()
     {
         SortLive();
-        if (_tempContent != null) return;
+        if (_tempContent != null || _dropping) return;
         TransitionToLiveState();
         UpdateVisibility();
     }
@@ -1662,6 +1731,10 @@ public sealed partial class IslandWindow : Window
 
     private void IslandRoot_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
+        // 投放会话期间指针被源进程捕获，拖拽开始时还会连带产生一次 Exited/Entered，
+        // 这些都不是"用户在悬停岛体"：一律不参与悬停裁决
+        if (_dropping) return;
+
         // 触控没有悬停语义（按下即进入、抬起即退出），不参与悬停状态：
         // 触控的展开由 IslandRoot_Tapped 里的 TouchExpand 负责。
         if (!IsTouchPointer(e))
@@ -1683,6 +1756,8 @@ public sealed partial class IslandWindow : Window
 
     private void IslandRoot_PointerExited(object sender, PointerRoutedEventArgs e)
     {
+        if (_dropping) return;
+
         // 手指抬起就是 PointerExited —— 这不是「离开」，触控展开要留着，点岛外才收
         if (IsTouchPointer(e)) return;
         // 触控展开常驻期间，鼠标进出也不裁决收起：一次触摸点击会连带产生鼠标事件，
@@ -1699,6 +1774,7 @@ public sealed partial class IslandWindow : Window
 
     private void IslandStack_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
+        if (_dropping) return;
         if (IsTouchPointer(e)) return;
         _hover = true;
         _hoverGuard.Start();
@@ -1706,6 +1782,7 @@ public sealed partial class IslandWindow : Window
 
     private void IslandStack_PointerExited(object sender, PointerRoutedEventArgs e)
     {
+        if (_dropping) return;
         if (IsTouchPointer(e)) return;
         if (_touchExpand) return;
         if (IsCursorOverIsland()) return;
@@ -1718,6 +1795,8 @@ public sealed partial class IslandWindow : Window
 
     private void IslandRoot_Tapped(object sender, TappedRoutedEventArgs e)
     {
+        if (_dropping) return;
+
         // 点插件自己的按钮/滑块不算"点岛体"：按钮内部的图标和文字才是 OriginalSource，
         // 必须顺着可视树上溯找祖先控件 —— 以前只看 OriginalSource 是不是 ButtonBase，
         // 结果点播控按钮也会触发 OnTap（点一下播放就弹出静音卡/聚光卡）。
@@ -1808,6 +1887,7 @@ public sealed partial class IslandWindow : Window
     private void HoverGuardTick()
     {
         if (!_hover) return;
+        if (_dropping) return;         // 投放会话期间岛体是投放面板，悬停看门狗不参与收起裁决
         if (_touchExpand) return;      // 触控展开常驻：鼠标位置不参与收起裁决
         if (!IsCursorOverIsland())
         {
@@ -1833,6 +1913,442 @@ public sealed partial class IslandWindow : Window
         const double slack = 6;
         return pt.X >= ix - slack && pt.X <= ix + iw + slack
                && pt.Y >= iy - slack && pt.Y <= iy + ih + slack;
+    }
+
+    #endregion
+
+    #region 文件投放（拖文件进岛）
+
+    /// <summary>
+    /// 投放面板尺寸（DIP）。它是常量，并且由 <see cref="ComputeCanvasFootprint"/> 在启动时就预留进画布 ——
+    /// 拖拽全程绝不 resize 窗口：客户区尺寸一变，DWM 会用上一帧合成新窗口矩形（残影），
+    /// OLE 拖放的命中也会被那次 resize 打断。
+    /// </summary>
+    private static readonly Size DropPanelSize = new(460, 104);
+    /// <summary>边缘自动滚动触发带宽度（DIP，相对滚动视口）。</summary>
+    private const double DropEdgeZone = 44;
+    /// <summary>边缘滚动最高速度（DIP/秒），按指针压入深度线性缩放。</summary>
+    private const double DropScrollMaxSpeed = 1100;
+    private const int DropScrollTickMs = 16;
+    /// <summary>指针离开岛体后的宽限收起时间：XAML 在子元素之间移动时偶发 DragLeave，立刻收会抖。</summary>
+    private const int DropExitGraceMs = 160;
+    /// <summary>速度一阶滤波系数：进出边缘带时加速/减速都是渐变的（那口"顺滑"就靠它）。</summary>
+    private const double DropScrollSmoothing = 0.25;
+    /// <summary>图片载荷的最大字节数：拖一张几十 MB 的图进来不值得把内存拉满。</summary>
+    private const int MaxDropImageBytes = 32 * 1024 * 1024;
+
+    /// <summary>可投放目标快照（IslandService 在台账变化时推来，已按 Order 排好）。</summary>
+    private IReadOnlyList<(string Owner, IslandDropTarget Target)> _dropTargets
+        = Array.Empty<(string, IslandDropTarget)>();
+    /// <summary>投放会话进行中：岛体是投放面板，悬停/内容切换都要为它让路。</summary>
+    private bool _dropping;
+    private DropStripView? _dropView;
+    private readonly DispatcherQueueTimer _dropScroll;
+    private readonly DispatcherQueueTimer _dropExitGrace;
+    /// <summary>本次会话读出来的载荷（卡片可投状态与摘要都按它算；未知表示还没读完）。</summary>
+    private DropPayload _dropPayload = DropPayload.Unknown;
+    /// <summary>最近一次 DragOver 的位置（滚动视口坐标，DIP）。</summary>
+    private double _dropPointerX = double.NaN;
+    private double _dropOffset;
+    private double _dropVelocity;
+    private int _dropArmedIndex = -1;
+    /// <summary>会话序号：异步读载荷期间用户可能已经拖走或又拖回来，回填时用它对齐。</summary>
+    private int _dropSessionId;
+
+    /// <summary>投放目标台账变化（插件注册/注销、宿主内置注册）。</summary>
+    public void SetDropTargets(IReadOnlyList<(string Owner, IslandDropTarget Target)> targets)
+    {
+        _dropTargets = targets;
+        _log.Debug($"投放目标已更新：{targets.Count} 个（{string.Join("、", targets.Select(t => t.Target.Title))}）");
+        if (_dropping) RefreshDropTiles();
+        EnsureCanvas();
+    }
+
+    /// <summary>按最新台账重建卡片：正在投放时立刻生效，已经被高亮的卡片不再存在就解除高亮。</summary>
+    private void RefreshDropTiles()
+    {
+        _dropView?.SetTargets(_dropTargets);
+        _dropArmedIndex = -1;
+        _dropOffset = Math.Min(_dropOffset, _dropView?.ScrollableWidth ?? 0);
+    }
+
+    private void IslandRoot_DragEnter(object sender, DragEventArgs e)
+    {
+        if (DescribeDrag(e.DataView) is IslandDropKind.None)
+        {
+            return;
+        }
+
+        e.AcceptedOperation = DataPackageOperation.Copy;
+        e.Handled = true;
+
+        if (_spotlightOccluded) return;      // 聚光卡期间岛体整块隐藏，拖放不该发生
+        _dropExitGrace.Stop();
+        BeginDropSession(e);
+    }
+
+    private void IslandRoot_DragOver(object sender, DragEventArgs e)
+    {
+        if (DescribeDrag(e.DataView) is IslandDropKind.None)
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            e.Handled = true;
+            return;
+        }
+
+        if (!_dropping && !_spotlightOccluded) BeginDropSession(e);
+
+        e.AcceptedOperation = _dropping ? DataPackageOperation.Copy : DataPackageOperation.None;
+        e.Handled = true;
+
+        if (!_dropping) return;
+
+        _dropExitGrace.Stop();
+        UpdateDropHover(e);
+    }
+
+    private void IslandRoot_DragLeave(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        if (!_dropping) return;
+
+        _dropExitGrace.Stop();
+        _dropExitGrace.Start();
+    }
+
+    private async void IslandRoot_Drop(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+
+        int armed = _dropArmedIndex;
+        bool hasTarget = _dropping && armed >= 0 && armed < _dropTargets.Count;
+        e.AcceptedOperation = hasTarget ? DataPackageOperation.Copy : DataPackageOperation.None;
+
+        var deferral = e.GetDeferral();
+        var target = hasTarget ? _dropTargets[armed] : default;
+        // 载荷可能在松手时还没读完（拖得很快）：先用缓存的那份，没有就现读一次
+        var payload = _dropPayload;
+
+        // 先收回岛体，再去读载荷/执行动作：插件动作可能等上几秒，不能让它把投放面板吊在屏幕上
+        EndDropSession();
+
+        try
+        {
+            if (!hasTarget) return;      // 没对准卡片：什么都不做（绝不误触发打开文件）
+
+            if (!payload.IsKnown) payload = await ReadPayloadAsync(e.DataView);
+            if (!payload.IsKnown)
+            {
+                _log.Warn($"投放「{target.Target.Title}」已忽略：这次拖拽的载荷读不出来。");
+                return;
+            }
+
+            // 卡片是在"载荷未知"时点亮的，这里按真实载荷复核一次（类型 + 扩展名）
+            if (!DropStripView.Accepts(target.Target, payload))
+            {
+                _log.Warn($"投放「{target.Target.Title}」已忽略：它不接受{Describe(payload)}。");
+                return;
+            }
+
+            _log.Info($"投放「{target.Target.Title}」（{target.Owner}）：{Describe(payload)}。");
+            var message = await target.Target.Handler(BuildContext(payload));
+            if (!string.IsNullOrEmpty(message))
+            {
+                ShowMessage(new IslandMessage
+                {
+                    Title = message,
+                    Glyph = target.Target.Glyph,
+                    AccentColor = target.Target.AccentColor,
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error("处理文件投放失败", ex);
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
+    /// <summary>展开成投放面板：岛体变宽、内容换成投放卡片。</summary>
+    private void BeginDropSession(DragEventArgs e)
+    {
+        if (_dropping) return;
+        if (!_settings.Get(DropEnabledKey, true)) return;
+
+        _dropping = true;
+        _dropSessionId++;
+        _dropArmedIndex = -1;
+        _dropPayload = DropPayload.Unknown;
+        _dropPointerX = double.NaN;
+        _dropOffset = 0;
+        _dropVelocity = 0;
+
+        // 投放面板与展开队列不能共存：队列排到岛体外面，会把面板顶出点击形状
+        TeardownQueue();
+        _expanded = false;
+        ClearTouchExpand();
+
+        _dropView = new DropStripView(_style, _materialApplied);
+        _dropView.SetTargets(_dropTargets);
+        ContentHost.Content = _dropView.Root;
+
+        EnsureCanvas();
+        AnimateIslandSize(DropPanelSize, ExpandDuration);
+        ApplyCornerRadius(DropPanelSize.Height, expanded: false);
+        _dropView.PlayEnter();
+        UpdateVisibility();
+
+        _ = RefreshDropPayloadAsync(e.DataView, _dropSessionId);
+    }
+
+    /// <summary>结束投放会话：收起面板、恢复原本的内容（与悬停收起同一套时序）。</summary>
+    private void EndDropSession()
+    {
+        if (!ClearDropSession()) return;
+
+        TransitionToLiveState();
+        UpdateVisibility();
+    }
+
+    /// <summary>只清会话状态与定时器，不动岛体外观（聚光卡遮挡等路径自己接管后续）。</summary>
+    private bool ClearDropSession()
+    {
+        if (!_dropping) return false;
+
+        _dropping = false;
+        _dropSessionId++;
+        _dropArmedIndex = -1;
+        _dropPayload = DropPayload.Unknown;
+        StopDropScroll();
+        _dropExitGrace.Stop();
+        _dropView = null;
+        return true;
+    }
+
+    /// <summary>会话仍在进行时把内容切回投放面板（临时消息结束、聚光卡关闭等路径会走到）。</summary>
+    private void ShowDropPanel()
+    {
+        if (_dropView == null) return;
+        ContentHost.Content = _dropView.Root;
+        AnimateIslandSize(DropPanelSize, ExpandDuration);
+        ApplyCornerRadius(DropPanelSize.Height, expanded: false);
+    }
+
+    /// <summary>
+    /// 拖拽期间的"悬停"：OLE 拖放期间指针被源进程捕获，我们收不到任何指针事件，
+    /// 位置只能从 DragOver 的坐标推。这里只记录位置 + 更新高亮与系统提示，
+    /// 滚动交给 16ms 定时器 —— 指针停着不动时 OLE 不再发 DragOver，光靠事件永远滚不起来。
+    /// </summary>
+    private void UpdateDropHover(DragEventArgs e)
+    {
+        if (_dropView == null) return;
+
+        var point = e.GetPosition(_dropView.Root);
+        _dropPointerX = _dropView.ToViewportPoint(point).X;
+        // 卡片增减后视口会自己夹一次滚动位置，这里跟它对齐，免得下一拍往回跳
+        _dropOffset = _dropView.HorizontalOffset;
+
+        int index = _dropView.HitTest(point);
+        if (_dropView.SetArmed(index)) _dropArmedIndex = index;
+
+        e.DragUIOverride.Caption = index >= 0 ? DropCaption(index) : "拖到卡片上松开";
+        e.DragUIOverride.IsCaptionVisible = true;
+        e.DragUIOverride.IsGlyphVisible = false;
+
+        // 在边缘带里才启动定时器；离开由定时器自己减速停下，不硬切
+        if (_dropView.ScrollableWidth > 1 && DropScrollTargetVelocity() != 0) _dropScroll.Start();
+    }
+
+    /// <summary>
+    /// 系统拖拽气泡的文案：卡片带副标题就一起写上（例如「记入历史」· 存进历史列表）——
+    /// 卡片只有 72px 宽，副标题在卡片上放不下，气泡是唯一能把"这张卡到底做什么"说清楚的地方。
+    /// </summary>
+    private string DropCaption(int index)
+    {
+        var title = _dropView?.TitleOf(index) ?? string.Empty;
+        var hint = index >= 0 && index < _dropTargets.Count ? _dropTargets[index].Target.Hint : null;
+        return string.IsNullOrWhiteSpace(hint) ? $"投放到「{title}」" : $"投放到「{title}」· {hint}";
+    }
+
+    /// <summary>目标滚速：越往边缘带里压越快（线性），带外为 0。</summary>
+    private double DropScrollTargetVelocity()
+    {
+        if (_dropView == null || double.IsNaN(_dropPointerX)) return 0;
+
+        double viewport = _dropView.ViewportWidth;
+        if (viewport <= 0) return 0;
+
+        double zone = Math.Min(DropEdgeZone, viewport / 3);
+        if (zone <= 0) return 0;
+
+        if (_dropPointerX < zone)
+        {
+            return -DropScrollMaxSpeed * Math.Clamp((zone - _dropPointerX) / zone, 0, 1);
+        }
+
+        if (_dropPointerX > viewport - zone)
+        {
+            return DropScrollMaxSpeed * Math.Clamp((_dropPointerX - (viewport - zone)) / zone, 0, 1);
+        }
+
+        return 0;
+    }
+
+    private void DropScrollTick()
+    {
+        if (!_dropping || _dropView == null)
+        {
+            StopDropScroll();
+            return;
+        }
+
+        double target = DropScrollTargetVelocity();
+        _dropVelocity += (target - _dropVelocity) * DropScrollSmoothing;
+
+        if (target == 0 && Math.Abs(_dropVelocity) < 4)
+        {
+            StopDropScroll();
+            return;
+        }
+
+        double max = _dropView.ScrollableWidth;
+        _dropOffset = Math.Clamp(_dropOffset + _dropVelocity * (DropScrollTickMs / 1000.0), 0, max);
+
+        // 撞到两端就把速度清零，免得在边界上顶着不动却还在加速
+        if ((_dropOffset <= 0 && _dropVelocity < 0) || (_dropOffset >= max && _dropVelocity > 0))
+        {
+            _dropVelocity = 0;
+        }
+
+        _dropView.ScrollTo(_dropOffset);
+    }
+
+    private void StopDropScroll()
+    {
+        _dropVelocity = 0;
+        _dropScroll.Stop();
+    }
+
+    /// <summary>载荷读取：面板先出来，摘要与卡片可投状态随后回填（读源进程的数据可能要等一拍）。</summary>
+    private async Task RefreshDropPayloadAsync(DataPackageView view, int sessionId)
+    {
+        try
+        {
+            var payload = await ReadPayloadAsync(view);
+            if (sessionId != _dropSessionId || !_dropping) return;
+            _dropPayload = payload;
+            _dropView?.SetPayload(payload);
+            // 卡片刚按真实载荷筛过一遍，高亮索引跟着视图走（被收起来的那张不能再算数）
+            _dropArmedIndex = _dropView?.ArmedIndex ?? -1;
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"读取拖入的内容失败（投放面板仍可用）：{ex.Message}");
+        }
+    }
+
+    /// <summary>按类型把 OLE 载荷读成宿主内部表示；读不出来时返回 <see cref="DropPayload.Unknown"/>。</summary>
+    private static async Task<DropPayload> ReadPayloadAsync(DataPackageView view)
+    {
+        switch (DescribeDrag(view))
+        {
+            case IslandDropKind.Files:
+            {
+                var paths = new List<string>();
+                var names = new List<string>();
+
+                foreach (var item in await view.GetStorageItemsAsync())
+                {
+                    // 虚拟机位（压缩包内、网络位置）没有真实路径，跳过
+                    if (string.IsNullOrEmpty(item.Path)) continue;
+                    paths.Add(item.Path);
+                    names.Add(item.Name);
+                }
+
+                return paths.Count > 0 ? new DropPayload(IslandDropKind.Files, paths, names) : DropPayload.Unknown;
+            }
+
+            case IslandDropKind.Text:
+            {
+                var text = await view.GetTextAsync();
+                return string.IsNullOrEmpty(text)
+                    ? DropPayload.Unknown
+                    : new DropPayload(IslandDropKind.Text, Array.Empty<string>(), Array.Empty<string>(), Text: text);
+            }
+
+            case IslandDropKind.Image:
+            {
+                var bytes = await ReadBitmapBytesAsync(view);
+                return bytes is { Length: > 0 }
+                    ? new DropPayload(IslandDropKind.Image, Array.Empty<string>(), Array.Empty<string>(), ImageBytes: bytes)
+                    : DropPayload.Unknown;
+            }
+
+            default:
+                return DropPayload.Unknown;
+        }
+    }
+
+    /// <summary>读图片字节（保留源格式）。超过上限或读不出来返回 null，调用方按"不支持"处理。</summary>
+    private static async Task<byte[]?> ReadBitmapBytesAsync(DataPackageView view)
+    {
+        try
+        {
+            var reference = await view.GetBitmapAsync();
+            using var stream = await reference.OpenReadAsync();
+            if (stream.Size == 0 || stream.Size > (ulong)MaxDropImageBytes) return null;
+
+            var bytes = new byte[stream.Size];
+            using var reader = new DataReader(stream);
+            await reader.LoadAsync((uint)stream.Size);
+            reader.ReadBytes(bytes);
+            return bytes;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 这次拖拽带的是哪种载荷（同步判定，DragEnter/DragOver 里用）。
+    /// 优先级：文件 &gt; 图片 &gt; 文本 —— 从浏览器拖图片时往往同时带文本（图片地址），那种情况要当图片处理。
+    /// </summary>
+    private static IslandDropKind DescribeDrag(DataPackageView view)
+    {
+        if (view.Contains(StandardDataFormats.StorageItems)) return IslandDropKind.Files;
+        if (view.Contains(StandardDataFormats.Bitmap)) return IslandDropKind.Image;
+        if (view.Contains(StandardDataFormats.Text)) return IslandDropKind.Text;
+        return IslandDropKind.None;
+    }
+
+    private static IslandDropContext BuildContext(DropPayload payload) => new()
+    {
+        Kind = payload.Kind,
+        Paths = payload.Paths,
+        Names = payload.Names,
+        Text = payload.Text,
+        ImageBytes = payload.ImageBytes,
+    };
+
+    /// <summary>日志用的载荷描述。</summary>
+    private static string Describe(DropPayload payload) => payload.Kind switch
+    {
+        IslandDropKind.Files => $"{payload.Paths.Count} 个文件",
+        IslandDropKind.Text => $"文本（{payload.Text?.Length ?? 0} 字符）",
+        IslandDropKind.Image => $"图片（{(payload.ImageBytes?.LongLength ?? 0) / 1024} KB）",
+        _ => "未知载荷",
+    };
+
+    /// <summary>island.dropEnabled：关掉后岛对文件拖放完全无感（连 DragEnter 都不会触发）。</summary>
+    private void ApplyDropSetting()
+    {
+        bool enabled = _settings.Get(DropEnabledKey, true);
+        IslandRoot.AllowDrop = enabled;
+        if (!enabled && _dropping) EndDropSession();
     }
 
     #endregion

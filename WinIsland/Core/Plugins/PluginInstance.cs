@@ -100,6 +100,23 @@ public sealed class PluginInstance
         }
     }
 
+    /// <summary>
+    /// 异步版守卫：插件回调可能 await（例如投放动作要读文件）。语义与 <see cref="InvokeGuarded"/> 一致 ——
+    /// 异常只记日志并计入自动停用，宿主不受影响。
+    /// </summary>
+    public async Task<T?> InvokeGuardedAsync<T>(string phase, Func<Task<T?>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (Exception ex)
+        {
+            RecordError(phase, ex);
+            return default;
+        }
+    }
+
     public UIElement GuardPageFactory(SettingsPageDescriptor page)
     {
         try

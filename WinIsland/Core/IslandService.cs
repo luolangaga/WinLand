@@ -10,6 +10,8 @@ public sealed class IslandService
     private readonly SettingsService _settings;
     private readonly SpotlightHost _spotlight;
     private readonly List<SettingsPageDescriptor> _pages = new();
+    // 投放目标台账：宿主内置的先注册（Order 900+），插件注册的按 Order 排在前面
+    private readonly List<(string Owner, IslandDropTarget Target)> _dropTargets = new();
 
     public IslandService(IslandWindow island, SettingsService settings, IPluginLogger log)
     {
@@ -75,6 +77,28 @@ public sealed class IslandService
 
     public void OpenSettings(string? pageId = null)
         => RunOnUI(() => SettingsOpenRequested?.Invoke(pageId));
+
+    /// <summary>
+    /// 注册一个投放目标。同一个 (ownerId, target.Id) 重复注册是覆盖语义；
+    /// 台账一变就把整份快照推给岛，岛在投放会话中会就地重建卡片。
+    /// </summary>
+    public void AddDropTarget(string ownerId, IslandDropTarget target)
+        => RunOnUI(() =>
+        {
+            _dropTargets.RemoveAll(t => t.Owner == ownerId && t.Target.Id == target.Id);
+            _dropTargets.Add((ownerId, target));
+            _dropTargets.Sort((a, b) => a.Target.Order.CompareTo(b.Target.Order));
+            _island.SetDropTargets(_dropTargets.ToArray());
+        });
+
+    public void RemoveDropTarget(string ownerId, string targetId)
+        => RunOnUI(() =>
+        {
+            if (_dropTargets.RemoveAll(t => t.Owner == ownerId && t.Target.Id == targetId) > 0)
+            {
+                _island.SetDropTargets(_dropTargets.ToArray());
+            }
+        });
 
     private void SortPages()
     {

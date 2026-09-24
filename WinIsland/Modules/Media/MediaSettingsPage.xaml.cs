@@ -49,8 +49,9 @@ public sealed partial class MediaSettingsPage : UserControl
         _settings.Set("priority", (int)PrioritySlider.Value);
     }
 
-    private void Refresh_Click(object sender, RoutedEventArgs e)
+    private async void Refresh_Click(object sender, RoutedEventArgs e)
     {
+        await _plugin.RefreshNowAsync();
         StatusText.Text = _plugin.StatusText;
     }
 }

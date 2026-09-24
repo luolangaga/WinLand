@@ -8,6 +8,7 @@ public sealed class ScopedIslandSurface : IIslandSurface
     private readonly PluginInstance _owner;
     private readonly IslandService _island;
     private readonly PluginScope _scope;
+    private readonly HashSet<string> _dropTargetIds = new(StringComparer.Ordinal);
     private bool _contentRevokerRegistered;
     private bool _temporaryRevokerRegistered;
     private bool _spotlightRevokerRegistered;
@@ -102,6 +103,39 @@ public sealed class ScopedIslandSurface : IIslandSurface
         _island.RemoveSettingsPage(ScopedPageId(pageId));
     }
 
+    public void AddDropTarget(IslandDropTarget target)
+    {
+        if (!_owner.TryEnter("AddDropTarget"))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(target.Id))
+        {
+            return;
+        }
+
+        // 停用/卸载时撤回：同一个 Id 只挂一个撤回器（重复注册同 Id 是覆盖语义，不需要再挂）
+        if (_dropTargetIds.Add(target.Id))
+        {
+            var id = target.Id;
+            _scope.Register(new ActionDisposable(() => _island.RemoveDropTarget(_owner.Info.Id, id)));
+        }
+
+        _island.AddDropTarget(_owner.Info.Id, Guard(target));
+    }
+
+    public void RemoveDropTarget(string targetId)
+    {
+        if (!_owner.TryEnter("RemoveDropTarget") || string.IsNullOrWhiteSpace(targetId))
+        {
+            return;
+        }
+
+        _dropTargetIds.Remove(targetId);
+        _island.RemoveDropTarget(_owner.Info.Id, targetId);
+    }
+
     public void OpenSpotlight(IslandSpotlight spotlight)
     {
         if (!_owner.TryEnter("OpenSpotlight"))
@@ -165,5 +199,21 @@ public sealed class ScopedIslandSurface : IIslandSurface
         CompactSize = content.CompactSize,
         ExpandedSize = content.ExpandedSize,
         OnTap = content.OnTap == null ? null : () => _owner.InvokeGuarded("点击回调", content.OnTap),
+    };
+
+    /// <summary>
+    /// 复制一份投放目标：插件之后改自己那份对象不再影响宿主，
+    /// 回调统一包进异步守卫（投放动作可能 await）。扩展名列表也复制，避免插件改了它以后宿主读到半截。
+    /// </summary>
+    private IslandDropTarget Guard(IslandDropTarget target) => new()
+    {
+        Id = target.Id,
+        Title = target.Title,
+        Glyph = target.Glyph,
+        Hint = target.Hint,
+        AccentColor = target.AccentColor,
+        Order = target.Order,
+        Extensions = target.Extensions?.ToArray(),
+        Handler = ctx => _owner.InvokeGuardedAsync("投放回调", () => target.Handler(ctx)),
     };
 }

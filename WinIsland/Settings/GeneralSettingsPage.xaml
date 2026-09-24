@@ -90,6 +90,31 @@
         </Border>
 
         <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="文件投放" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="把文件/文件夹拖到岛上时展开成一排投放卡片，松手执行对应动作"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <ToggleSwitch
+                    x:Name="DropToggle"
+                    Grid.Column="1"
+                    MinWidth="0"
+                    VerticalAlignment="Center"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="DropToggle_Toggled" />
+            </Grid>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
             <StackPanel Spacing="4">
                 <TextBlock Text="位置" />
                 <TextBlock

@@ -27,6 +27,8 @@ public interface IIslandSurface
     void DismissTemporary();
     void AddSettingsPage(SettingsPageDescriptor page);
     void RemoveSettingsPage(string pageId);
+    void AddDropTarget(IslandDropTarget target);
+    void RemoveDropTarget(string targetId);
     void OpenSpotlight(IslandSpotlight spotlight);
     void CloseSpotlight();
 }

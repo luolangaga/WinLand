@@ -113,6 +113,7 @@ Dispose/卸载 → Unloading → 程序集请求卸载并验证回收
 | `Island.ShowMessage(msg)` | 临时消息（标题 + 正文 + 图标 + 时长） |
 | `Island.Show(uiElement, size, duration)` | 临时展示任意控件 |
 | `Island.AddSettingsPage(desc)` | 注册设置页（停用时自动移除） |
+| `Island.AddDropTarget(target)` | 注册文件投放目标：拖文件到岛上时的一排卡片（见下方「文件投放」小节；停用时自动移除） |
 | `Register(IDisposable)` | 登记需要在停用时释放的资源（订阅、原生句柄…） |
 | `OnSettingsChanged(key, handler)` | 监听某个设置键（handler 在 UI 线程调用） |
 | `CreateTimer(interval, repeat, tick)` | UI 线程定时器（停用时自动停止并解绑） |
@@ -212,6 +213,82 @@ private void OpenDetail()
 * **生命周期跟着 `Loaded` / `Unloaded` 走**：收起时宿主会把内容从可视树卸下，视图收到 `Unloaded`（定时器在 `Loaded` 里起、`Unloaded` 里停）；`OnClosed` 用来做取消网络请求之类的收尾。视图实例可以复用，重复打开不必重建。
 * 同一时刻**只有一张**聚光卡：别的插件再次请求时替换，旧 owner 会先收到 `OnClosed`；插件停用/卸载时宿主自动收起它的卡片，不留幽灵窗口。
 * 宿主低于 2.1.0 时这些 API 不存在，调用会抛 `MissingMethodException`（宿主按插件异常捕获并记日志）。要用它就把 `plugin.json` 的 `min_host_version` 提到 `"2.1.0"`；`api_version` 仍然是 `2`（纯增量 API）。
+
+### 文件投放（拖文件到岛上）
+
+把**文件/文件夹、文本、图片**拖到岛上时，岛会展开成一排**投放卡片**，每张卡片是一个"松手就执行"的动作。
+用户拖着内容悬停时卡片会放大高亮、指针压到两端时列表自动横向滚动、系统拖拽气泡显示「投放到「XXX」」，
+左侧摘要会按载荷换样子（文件名 / 文本前两行 / 图片缩略图）。
+展示、命中、滚动、动画全部由宿主接管，插件只负责「拿到内容之后干什么」。
+
+```csharp
+Context.Island.AddDropTarget(new IslandDropTarget
+{
+    Id = "add-to-playlist",                     // 插件内唯一；重复注册同一个 Id 是覆盖语义
+    Title = "加入播放列表",
+    Glyph = "\uE8C8",                           // Segoe Fluent Icons / Segoe MDL2 Assets 字形
+    Hint = "加进当前列表",                       // 可选副标题
+    AccentColor = Windows.UI.Color.FromArgb(255, 0x4C, 0xC2, 0xFF),   // 可选，卡片高亮用它着色
+    Order = 100,                                // 升序；宿主内置的动作用 900+，插件默认 0 排在前面
+    Kinds = IslandDropKind.Files,               // 接受哪些载荷，默认 Files
+    Extensions = new[] { ".mp3", ".flac" },     // 可选：文件的扩展名白名单（不填 = 全收）
+    Handler = async context =>
+    {
+        foreach (var path in context.Paths) await AddAsync(path);
+        return $"已加入 {context.Paths.Count} 首";     // 返回文案 → 宿主弹一条临时消息
+    },
+});
+
+// 三种载荷都能收（比如"存进历史"这种卡片）
+Context.Island.AddDropTarget(new IslandDropTarget
+{
+    Id = "remember", Title = "记入历史",
+    Kinds = IslandDropKind.All,
+    Handler = async context =>
+    {
+        switch (context.Kind)
+        {
+            case IslandDropKind.Text:  await SaveTextAsync(context.Text); break;
+            case IslandDropKind.Image: await SaveImageAsync(context.ImageBytes); break;
+            default:                   await SavePathsAsync(context.Paths); break;
+        }
+        return "已记入历史";
+    },
+});
+```
+
+| 成员 | 说明 |
+|------|------|
+| `Id` / `Title` | 卡片标识与标题（必填） |
+| `Glyph` / `Hint` / `AccentColor` | 卡片外观：图标 / 副标题 / 高亮色，都可省。**`Hint` 会显示在系统拖拽气泡里**（卡片只有 72px 宽，副标题放不下）—— 卡片做什么一句话说不清时，这是唯一的说明位置 |
+| `Order` | 卡片顺序。插件目标默认排在宿主内置动作（打开 / 所在位置 / 复制路径 / 复制文本 / 保存图片）前面 |
+| `Kinds` | 接受哪些载荷：`IslandDropKind.Files` / `Text` / `Image`，可用 `\|` 组合，`All` 是全收。不匹配的载荷拖进来时**这张卡片根本不出现**（不是变暗） |
+| `Extensions` | 文件的扩展名白名单（含点、忽略大小写），**只对 `Files` 生效**。载荷里没有任何一项匹配时这张卡片同样不出现 |
+| `Handler` | `IslandDropContext → Task<string?>`：在 **UI 线程**被调用，返回的文案由宿主弹出（返回 `null` 表示不提示） |
+
+`IslandDropContext` 一次只带一种载荷：
+
+| 成员 | 说明 |
+|------|------|
+| `Kind` | 本次载荷类型（与卡片 `Kinds` 匹配的那一种） |
+| `Paths` / `Names` | 文件/文件夹的完整路径与文件名（`Kind == Files` 时有值） |
+| `Text` | 文本内容（`Kind == Text` 时有值；网址链接也走这里） |
+| `ImageBytes` | 图片原始字节，**保留源格式**（`Kind == Image` 时有值，通常是 PNG / JPEG） |
+| `ItemCount` / `IsSingle` | 这一批有多少项：文件是路径条数，文本/图片算 1 |
+
+必须知道的行为：
+
+* **只对文件、文本、图片触发**：其它载荷（HTML 片段、自定义格式等）不会打开投放面板。
+  从浏览器拖图片时往往同时带文本（图片地址），宿主按 **文件 > 图片 > 文本** 的顺序判定。
+* **不匹配的卡片不会出现**：面板只展示"能对这份载荷做什么"，一张都匹配不上时摘要会写明「没有卡片能接收它」。
+  但用户拖得很快（载荷还没读完就松手）时卡片会先全亮 —— 宿主会在松手瞬间按真实载荷复核一次，不匹配就当落空，不会误触发。
+* **松手落空 = 什么都不做**（绝不误触发动作），岛随即收回；拖出岛外或按 `Esc` 取消同理。
+* **图片有大小上限**（32 MB）：超过或读不出来时这张卡片等于落空，日志里会写明原因。
+* **`Handler` 抛异常不影响宿主**：宿主把回调包在守卫里，只记日志并计入「累计 5 次未处理异常自动停用」。
+* **插件停用/卸载时卡片自动消失**（`PluginScope` 兜底），注册过的投放目标不需要自己清理。
+* 面板在松手时就已经收回，所以动作慢一点没关系：用户看到的是你返回的那条消息。
+* 需要宿主 **2.2.0** 及以上：把 `plugin.json` 的 `min_host_version` 提到 `"2.2.0"`（`api_version` 仍是 `2`，纯增量 API）。
+  参考实现见宿主内置的五个动作：`WinIsland/Core/DropTargets/HostDropTargets.cs`。
 
 ---
 

@@ -39,6 +39,7 @@ public sealed partial class GeneralSettingsPage : UserControl
 
         VisibleToggle.IsOn = _settings.Get("island.visible", true);
         HideIdleToggle.IsOn = _settings.Get("island.hideWhenIdle", false);
+        DropToggle.IsOn = _settings.Get("island.dropEnabled", true);
 
         LoadOffsetControl();
         HorizontalOffsetSlider.Value = _settings.Get(HorizontalOffsetKey, 0.0);
@@ -260,6 +261,12 @@ public sealed partial class GeneralSettingsPage : UserControl
     {
         if (_loading) return;
         _settings.Set("island.hideWhenIdle", HideIdleToggle.IsOn);
+    }
+
+    private void DropToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _settings.Set("island.dropEnabled", DropToggle.IsOn);
     }
 
     private void OffsetSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)

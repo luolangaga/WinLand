@@ -355,6 +355,12 @@ internal static partial class Win32
             var name = new char[64];
             int len = GetClassName(cur, name, name.Length);
             string cls = len > 0 ? new string(name, 0, len) : "(未知类)";
+
+            // 系统拖拽缩略图（OLE 拖放循环创建的、跟随光标的那一小块）不算「压住岛」：
+            // 它必须待在光标附近的最上层，把岛顶到它上面会让缩略图被岛盖住 ——
+            // 用户正对着岛拖文件时尤其明显（文件投放期间每 120ms 就会触发一次重升）
+            if (string.Equals(cls, "SysDragImage", StringComparison.Ordinal)) continue;
+
             return $"{cls} {rect.Left},{rect.Top} {rect.Right - rect.Left}x{rect.Bottom - rect.Top}";
         }
         return null;

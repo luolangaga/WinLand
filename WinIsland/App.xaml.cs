@@ -1,5 +1,6 @@
 ﻿using Microsoft.UI.Xaml;
 using WinIsland.Core;
+using WinIsland.Core.DropTargets;
 using WinIsland.Core.Marketplace;
 using WinIsland.Core.Plugins;
 using WinIsland.Core.Update;
@@ -92,6 +93,9 @@ public partial class App : Application
                 "plugins", "插件管理", "\uE712", () => new PluginManagerPage(_plugins, _settings), 1000));
             _service.AddSettingsPage(new SettingsPageDescriptor(
                 "about", "关于", "\uE946", () => new AboutSettingsPage(_updates), 1100));
+
+            // 宿主内置的文件投放动作（打开 / 所在位置 / 复制路径）
+            HostDropTargets.Register(_service, _logs.Host);
 
             _service.SendMessage(new IslandMessage
             {

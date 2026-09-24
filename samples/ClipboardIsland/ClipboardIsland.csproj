@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>ClipboardIsland</RootNamespace>
+    <Platforms>x86;x64;ARM64</Platforms>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WinUISDKReferences>false</WinUISDKReferences>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <WindowsPackageType>None</WindowsPackageType>
+    <EnableMsixTooling>false</EnableMsixTooling>
+
+    <WinIslandPluginsDir Condition="'$(WinIslandPluginsDir)' == ''">$(MSBuildThisFileDirectory)..\..\WinIsland\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\plugins</WinIslandPluginsDir>
+    <PluginTargetDir>$(WinIslandPluginsDir)\clipboard-island</PluginTargetDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Windows App SDK / WinUI 运行时由宿主提供，排除出运行时，避免打进插件包 -->
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2526" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" PrivateAssets="all" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\WinIsland.Core\WinIsland.Core.csproj" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="plugin.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="README.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- 构建后：把插件文件拷进宿主 plugins\clipboard-island\（宿主的运行时文件不拷） -->
+  <Target Name="CopyToWinIsland" AfterTargets="Build">
+    <ItemGroup>
+      <PluginArtifacts Include="$(OutDir)**\*.*" />
+      <PluginArtifacts Remove="$(OutDir)WinIsland.Core.dll" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.WinUI.dll" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.Windows.SDK.NET.dll" />
+      <PluginArtifacts Remove="$(OutDir)WinRT.Runtime.dll" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.Windows.*.dll" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.Web.WebView2*.dll" />
+      <PluginArtifacts Remove="$(OutDir)WebView2Loader.dll" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.Graphics.*.dll" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.InteractiveExperiences.*.dll" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.*.Projection.dll" />
+      <PluginArtifacts Remove="$(OutDir)Microsoft.WindowsAppRuntime*" />
+      <PluginArtifacts Remove="$(OutDir)**\*.pdb" />
+    </ItemGroup>
+    <MakeDir Directories="$(PluginTargetDir)" />
+    <Copy SourceFiles="@(PluginArtifacts)" DestinationFiles="@(PluginArtifacts->'$(PluginTargetDir)\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

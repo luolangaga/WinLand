@@ -28,13 +28,28 @@
             <Border
                 x:Name="IslandRoot"
                 Grid.Row="0"
+                AllowDrop="True"
                 HorizontalAlignment="Center"
                 Background="#FF000000"
                 CornerRadius="17"
+                DragEnter="IslandRoot_DragEnter"
+                DragLeave="IslandRoot_DragLeave"
+                DragOver="IslandRoot_DragOver"
+                Drop="IslandRoot_Drop"
                 PointerEntered="IslandRoot_PointerEntered"
                 PointerExited="IslandRoot_PointerExited"
                 Tapped="IslandRoot_Tapped">
-                <ContentPresenter x:Name="ContentHost" />
+                <Grid>
+                    <ContentPresenter x:Name="ContentHost" />
+                    <!-- 内容交接层：换内容时旧内容按原尺寸钉在这里淡出（见 IslandWindow.SwapContent）。
+                         永远不吃命中，也不参与布局 —— 只是一个正在退场的快照。 -->
+                    <ContentPresenter
+                        x:Name="ContentLeaving"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        IsHitTestVisible="False"
+                        Opacity="0" />
+                </Grid>
             </Border>
             <StackPanel
                 x:Name="QueuePanel"

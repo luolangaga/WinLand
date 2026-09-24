@@ -14,6 +14,18 @@ public sealed class MediaPlugin : IslandPluginBase
     private GlobalSystemMediaTransportControlsSession? _session;
     private readonly List<GlobalSystemMediaTransportControlsSession> _sessions = new();
 
+    // GSMTC 的会话管理器会僵死：请求它时系统里还没有任何会话的话，此后它的事件不再触发，
+    // GetSessions/GetCurrentSession 也永远只返回那一刻的快照（cppwinrt#1310）。
+    // 唯一可靠的恢复手段是重新 RequestAsync，所以这里按固定节奏重绑并收敛状态，
+    // 保证任何媒体一开始播放都能自动同步，而不是靠用户手动刷新。
+    private static readonly TimeSpan IdleSyncInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan LiveSyncInterval = TimeSpan.FromSeconds(15);
+
+    private bool _rebinding;
+    private bool _shuttingDown;
+    private DateTime _lastSyncUtc = DateTime.MinValue;
+    private string? _pinnedAppId;
+
     private MediaViewModel _vm = null!;
     private MediaIslandView _islandView = null!;
     private MediaSpotlightView? _spotlightView;
@@ -31,6 +43,7 @@ public sealed class MediaPlugin : IslandPluginBase
 
     protected override async Task OnInitializeAsync()
     {
+        _shuttingDown = false;
         _enabled = Settings.Get("enabled", true);
         _priority = Settings.Get("priority", DefaultPriority);
 
@@ -73,13 +86,13 @@ public sealed class MediaPlugin : IslandPluginBase
             UpdateContent(_content);
         });
 
+        Context.CreateTimer(TimeSpan.FromSeconds(1), true, WatchdogTick);
+
         try
         {
             _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
-            _manager.CurrentSessionChanged += OnManagerCurrentSessionChanged;
-            _manager.SessionsChanged += OnManagerSessionsChanged;
-            OnSessionsChanged();
-            OnCurrentSessionChanged();
+            SubscribeManager();
+            await ReconcileSessionsAsync();
         }
         catch (Exception ex)
         {
@@ -90,12 +103,9 @@ public sealed class MediaPlugin : IslandPluginBase
 
     protected override Task OnShutdownAsync()
     {
-        if (_manager != null)
-        {
-            _manager.CurrentSessionChanged -= OnManagerCurrentSessionChanged;
-            _manager.SessionsChanged -= OnManagerSessionsChanged;
-            _manager = null;
-        }
+        _shuttingDown = true;
+        UnsubscribeManager();
+        _manager = null;
 
         DetachSession();
         _sessions.Clear();
@@ -162,40 +172,171 @@ public sealed class MediaPlugin : IslandPluginBase
     private void SetLive(bool show) => SetContent(show ? _content : null);
 
     private void OnManagerCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, CurrentSessionChangedEventArgs args)
-        => RunOnUI(OnCurrentSessionChanged);
+        => RunOnUI(() => _ = ReconcileSessionsAsync());
 
     private void OnManagerSessionsChanged(GlobalSystemMediaTransportControlsSessionManager sender, SessionsChangedEventArgs args)
-        => RunOnUI(OnSessionsChanged);
+        => RunOnUI(() => _ = ReconcileSessionsAsync());
 
-    private void OnSessionsChanged()
+    private void SubscribeManager()
     {
-        _sessions.Clear();
+        if (_manager == null) return;
+        _manager.CurrentSessionChanged += OnManagerCurrentSessionChanged;
+        _manager.SessionsChanged += OnManagerSessionsChanged;
+    }
+
+    private void UnsubscribeManager()
+    {
+        if (_manager == null) return;
         try
         {
-            foreach (var session in _manager?.GetSessions() ?? Array.Empty<GlobalSystemMediaTransportControlsSession>())
-            {
-                _sessions.Add(session);
-            }
+            _manager.CurrentSessionChanged -= OnManagerCurrentSessionChanged;
+            _manager.SessionsChanged -= OnManagerSessionsChanged;
         }
         catch
         {
         }
-
-        _vm.HasMultipleSessions = _sessions.Count > 1;
-        _vm.SessionCount = _sessions.Count;
-        UpdateSessionIndex();
     }
 
-    private void OnCurrentSessionChanged()
+    private void WatchdogTick()
     {
-        var session = _manager?.GetCurrentSession();
-        if (ReferenceEquals(session, _session) && session != null) return;
+        if (!_enabled || _shuttingDown) return;
 
-        DetachSession();
-        _session = session;
-        AttachSession();
-        UpdateSessionIndex();
-        _ = RefreshAsync();
+        var interval = _session == null ? IdleSyncInterval : LiveSyncInterval;
+        if (DateTime.UtcNow - _lastSyncUtc < interval) return;
+        _ = RebindAsync();
+    }
+
+    public Task RefreshNowAsync() => RebindAsync();
+
+    private async Task RebindAsync()
+    {
+        if (_rebinding || _shuttingDown) return;
+
+        _rebinding = true;
+        _lastSyncUtc = DateTime.UtcNow;
+        try
+        {
+            var fresh = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+            if (_shuttingDown) return;
+
+            if (!ReferenceEquals(fresh, _manager))
+            {
+                UnsubscribeManager();
+                _manager = fresh;
+                SubscribeManager();
+            }
+
+            await ReconcileSessionsAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"重新获取媒体会话管理器失败：{ex.Message}");
+        }
+        finally
+        {
+            _rebinding = false;
+        }
+    }
+
+    private async Task ReconcileSessionsAsync()
+    {
+        try
+        {
+            _sessions.Clear();
+            try
+            {
+                foreach (var session in _manager?.GetSessions() ?? Array.Empty<GlobalSystemMediaTransportControlsSession>())
+                {
+                    _sessions.Add(session);
+                }
+            }
+            catch
+            {
+            }
+
+            _vm.HasMultipleSessions = _sessions.Count > 1;
+            _vm.SessionCount = _sessions.Count;
+
+            var target = ResolveSession();
+            if (!ReferenceEquals(target, _session))
+            {
+                DetachSession();
+                _session = target;
+                AttachSession();
+            }
+
+            UpdateSessionIndex();
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"同步媒体会话失败：{ex.Message}");
+        }
+    }
+
+    private GlobalSystemMediaTransportControlsSession? ResolveSession()
+    {
+        if (_pinnedAppId != null)
+        {
+            var pinned = FindSession(_pinnedAppId);
+            if (pinned != null && IsActive(pinned)) return pinned;
+            _pinnedAppId = null;
+        }
+
+        var current = _manager?.GetCurrentSession();
+        if (current != null && IsActive(current))
+        {
+            return FindSession(current.SourceAppUserModelId) ?? current;
+        }
+
+        foreach (var session in _sessions)
+        {
+            if (IsPlaying(session)) return session;
+        }
+
+        foreach (var session in _sessions)
+        {
+            if (IsActive(session)) return session;
+        }
+
+        return current;
+    }
+
+    private GlobalSystemMediaTransportControlsSession? FindSession(string appId)
+    {
+        foreach (var session in _sessions)
+        {
+            if (string.Equals(session.SourceAppUserModelId, appId, StringComparison.Ordinal)) return session;
+        }
+
+        return null;
+    }
+
+    private static bool IsPlaying(GlobalSystemMediaTransportControlsSession session)
+    {
+        try
+        {
+            return session.GetPlaybackInfo().PlaybackStatus
+                == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsActive(GlobalSystemMediaTransportControlsSession session)
+    {
+        try
+        {
+            var status = session.GetPlaybackInfo().PlaybackStatus;
+            return status is GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
+                or GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private void AttachSession()
@@ -237,6 +378,7 @@ public sealed class MediaPlugin : IslandPluginBase
 
         DetachSession();
         _session = target;
+        _pinnedAppId = target.SourceAppUserModelId;
         AttachSession();
         _vm.SessionIndex = index;
         _lastSourceAppId = null;
