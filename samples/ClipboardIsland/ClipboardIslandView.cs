@@ -57,6 +57,7 @@ public sealed class ClipboardIslandView : UserControl, IMorphView
 
     private readonly SolidColorBrush _idleIconBrush;
     private readonly SolidColorBrush _accentIconBrush;
+    private readonly IIslandTheme _theme;
 
     private readonly DispatcherQueueTimer? _morphTimer;
     private DateTimeOffset _morphStart;
@@ -81,13 +82,16 @@ public sealed class ClipboardIslandView : UserControl, IMorphView
 
     private string? _loadedThumbId;
 
-    public ClipboardIslandView(PluginManifest manifest, Action<ClipItem> onPick)
+    public ClipboardIslandView(PluginManifest manifest, Action<ClipItem> onPick, IIslandTheme theme)
     {
         _onPick = onPick;
+        _theme = theme;
 
         var accent = Windows.UI.Color.FromArgb(255, 0x4C, 0xC2, 0xFF);
-        _idleIconBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(235, 255, 255, 255));
+        // 中性色跟着岛体主题走：Fluent + 浅色系统下岛体是浅底，写死白色就是白字压白底
+        _idleIconBrush = new SolidColorBrush(Neutral(theme, 235));
         _accentIconBrush = new SolidColorBrush(accent);
+        var neutralFill = new SolidColorBrush(Neutral(theme, 34));
 
         _accentBar = new Border
         {
@@ -113,7 +117,7 @@ public sealed class ClipboardIslandView : UserControl, IMorphView
         {
             CornerRadius = new CornerRadius(5),
             Opacity = 0,
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(34, 255, 255, 255)),
+            Background = neutralFill,
             Child = _thumb,
         };
 
@@ -133,14 +137,14 @@ public sealed class ClipboardIslandView : UserControl, IMorphView
             MaxLines = 1,
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+            Foreground = new SolidColorBrush(Neutral(theme, 255)),
         };
 
         _count = new TextBlock
         {
             FontSize = 11,
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = Hint(140),
+            Foreground = new SolidColorBrush(Neutral(theme, 140)),
         };
 
         _detailHint = new TextBlock
@@ -148,7 +152,7 @@ public sealed class ClipboardIslandView : UserControl, IMorphView
             FontSize = 11,
             MaxLines = 1,
             TextTrimming = TextTrimming.CharacterEllipsis,
-            Foreground = Hint(130),
+            Foreground = new SolidColorBrush(Neutral(theme, 130)),
         };
 
         _detailRows = new StackPanel { Spacing = 0 };
@@ -230,7 +234,7 @@ public sealed class ClipboardIslandView : UserControl, IMorphView
         var shown = Math.Min(ExpandedRows, items.Count);
         for (var i = 0; i < shown; i++)
         {
-            _detailRows.Children.Add(new ClipRow(items[i], interactive: true, invoke: _onPick, dense: true));
+            _detailRows.Children.Add(new ClipRow(items[i], _theme, interactive: true, invoke: _onPick, dense: true));
         }
 
         _detailHint.Text = items.Count switch
@@ -434,6 +438,29 @@ public sealed class ClipboardIslandView : UserControl, IMorphView
         UpdateHeadline();
     }
 
-    private static SolidColorBrush Hint(byte alpha)
-        => new(Windows.UI.Color.FromArgb(alpha, 255, 255, 255));
+    /// <summary>
+    /// 岛体换主题时就地重刷所有中性色。代码搭的视图颜色是烘在画刷里的，
+    /// 不重刷就会留在旧主题（浅色时建的深色文字会原封不动留在深色岛上）。
+    /// </summary>
+    internal void RefreshTheme()
+    {
+        _idleIconBrush.Color = Neutral(_theme, 235);
+        _thumbFrame.Background = new SolidColorBrush(Neutral(_theme, 34));
+        _headline.Foreground = new SolidColorBrush(Neutral(_theme, 255));
+        _count.Foreground = new SolidColorBrush(Neutral(_theme, 140));
+        _detailHint.Foreground = new SolidColorBrush(Neutral(_theme, 130));
+
+        foreach (var child in _detailRows.Children)
+        {
+            if (child is ClipRow row) row.RefreshTheme();
+        }
+    }
+
+    /// <summary>
+    /// 中性色的唯一来源：岛体深色时是白色系，浅色（Fluent + 浅色系统）时是黑色系。
+    /// 只写死白色的话，浅色岛体上就是白字压白底。
+    /// </summary>
+    private static Windows.UI.Color Neutral(IIslandTheme theme, byte alpha) => theme.IsLight
+        ? Windows.UI.Color.FromArgb(alpha, 0, 0, 0)
+        : Windows.UI.Color.FromArgb(alpha, 255, 255, 255);
 }

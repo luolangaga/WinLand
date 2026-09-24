@@ -134,7 +134,7 @@ public sealed class MediaPlugin : IslandPluginBase
     {
         if (_session == null || string.IsNullOrWhiteSpace(_vm.Title)) return;
 
-        _spotlightView ??= new MediaSpotlightView(_vm, _lyrics, _levelMonitor);
+        _spotlightView ??= new MediaSpotlightView(_vm, _lyrics, _levelMonitor, Theme);
         _spotlightOpen = true;
         Context.Island.OpenSpotlight(new IslandSpotlight
         {

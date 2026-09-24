@@ -114,6 +114,7 @@ Dispose/卸载 → Unloading → 程序集请求卸载并验证回收
 | `Island.Show(uiElement, size, duration)` | 临时展示任意控件 |
 | `Island.AddSettingsPage(desc)` | 注册设置页（停用时自动移除） |
 | `Island.AddDropTarget(target)` | 注册文件投放目标：拖文件到岛上时的一排卡片（见下方「文件投放」小节；停用时自动移除） |
+| `Theme` | 岛体当前的明暗主题（`IIslandTheme`：`IsLight` + `Changed`），配色适配用（见下方「主题与配色」；需宿主 ≥ 2.3.0） |
 | `Register(IDisposable)` | 登记需要在停用时释放的资源（订阅、原生句柄…） |
 | `OnSettingsChanged(key, handler)` | 监听某个设置键（handler 在 UI 线程调用） |
 | `CreateTimer(interval, repeat, tick)` | UI 线程定时器（停用时自动停止并解绑） |
@@ -289,6 +290,52 @@ Context.Island.AddDropTarget(new IslandDropTarget
 * 面板在松手时就已经收回，所以动作慢一点没关系：用户看到的是你返回的那条消息。
 * 需要宿主 **2.2.0** 及以上：把 `plugin.json` 的 `min_host_version` 提到 `"2.2.0"`（`api_version` 仍是 `2`，纯增量 API）。
   参考实现见宿主内置的五个动作：`WinIsland/Core/DropTargets/HostDropTargets.cs`。
+
+---
+
+### 主题与配色（浅色 / 深色适配）
+
+岛的 Fluent 外观**跟随系统明暗**（设置 → 个性化 → 颜色 → 「默认应用模式」，进程存活期间切换也当场生效），Apple 外观恒为深色黑胶囊。插件视图必须两套都能看：写死 `Colors.White` → 浅色主题下白字压白底；浅色时建好、之后不重刷 → 系统切深色后变成深色岛上的黑字。
+
+**XAML 视图**：文字用系统画刷，岛体换主题时它们自己跟着换；自定义中性色写进 `ThemeDictionaries` 的 `Light` / `Dark` 两套，再用 `{ThemeResource 你的键}` 取。
+
+```xml
+<TextBlock Text="标题" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+<TextBlock Text="说明" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+```
+
+**代码搭的视图**：构造时接收 `IIslandTheme`（`Context.Theme` / `IslandPluginBase.Theme`），按 `theme.IsLight` 选色；中性色做成共享 `SolidColorBrush` 字段，订阅 `theme.Changed` 时只改它们的 `Color`（一支画刷被多处引用，改一次全跟着变）。
+
+```csharp
+public MyPluginView(PluginManifest manifest, IIslandTheme theme)
+{
+    _theme = theme;
+    ApplyThemeColors();
+    _theme.Changed += ApplyThemeColors;   // 岛体换主题（UI 线程）
+    ...
+    _title.Foreground = _textBrush;       // 用共享画刷，别 new 一支写死的
+}
+
+private void ApplyThemeColors()
+{
+    _textBrush.Color = Neutral(255);
+    _faintBrush.Color = Neutral(160);
+}
+
+/// <summary>中性色：岛体深色时白色系，浅色（Fluent + 浅色系统）时黑色系。</summary>
+private Windows.UI.Color Neutral(byte alpha) => _theme.IsLight
+    ? Windows.UI.Color.FromArgb(alpha, 0, 0, 0)
+    : Windows.UI.Color.FromArgb(alpha, 255, 255, 255);
+```
+
+| 成员 | 说明 |
+|------|------|
+| `IIslandTheme.IsLight` | 岛体当前是否浅色（Apple 风格恒为 `false`）；**这是岛体的明暗，不是系统主题**，别自己去读注册表或用应用级主题代替 |
+| `IIslandTheme.Changed` | 主题变化（UI 线程触发）：在这里重刷配色 |
+
+* 聚光卡（见上）是另一棵可视树，同样要接 `IIslandTheme`：卡片本身也跟着岛体一起明暗切换。
+* 需要宿主 **2.3.0** 及以上：把 `plugin.json` 的 `min_host_version` 提到 `"2.3.0"`（`api_version` 仍是 `2`，纯增量 API）。
+* 自查：把系统主题切一遍（浅色↔深色），岛上的文字、灰底、分隔线都得跟着变。
 
 ---
 

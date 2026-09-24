@@ -7,7 +7,7 @@
   "icon_glyph": "\uE8BD",
   "entry_dll": "HelloPlugin.dll",
   "api_version": 2,
-  "min_host_version": "2.0.0",
+  "min_host_version": "2.3.0",
   "license": "MIT",
   "tags": ["sample", "demo"]
 }

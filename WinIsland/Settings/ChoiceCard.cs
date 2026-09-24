@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.Foundation;
 using Windows.UI;
+using WinIsland.Core;
 using WinIsland.Island;
 
 namespace WinIsland.Settings;
@@ -178,21 +179,52 @@ internal sealed class ChoiceCard
         => PreviewFrame(
             style,
             materialApplied: style == IslandStyleKind.Fluent,
-            new SolidColorBrush(style == IslandStyleKind.Apple
-                ? Color.FromArgb(255, 20, 20, 24)
-                : Color.FromArgb(255, 38, 38, 46)));
+            FlatWallpaper(),
+            SystemTheme.IsLight);
 
     /// <summary>材质预览：Acrylic 高透（彩色壁纸从底下透出来）/ Mica 偏不透明（低饱和壁纸色）。</summary>
     public static FrameworkElement MaterialPreview(IslandMaterialKind material)
-    {
-        bool acrylic = material == IslandMaterialKind.Acrylic;
-        return PreviewFrame(
+        => PreviewFrame(
             IslandStyleKind.Fluent,
-            materialApplied: acrylic,
-            acrylic ? VividWallpaper() : MutedWallpaper());
+            materialApplied: material == IslandMaterialKind.Acrylic,
+            Wallpaper(vivid: material == IslandMaterialKind.Acrylic),
+            SystemTheme.IsLight);
+
+    /// <summary>风格预览的底：一整块中性色，注意力留给岛体本身（跟着主题明暗，否则浅色下白胶囊看不见）。</summary>
+    private static Brush FlatWallpaper()
+        => new SolidColorBrush(SystemTheme.IsLight
+            ? Color.FromArgb(255, 244, 244, 246)
+            : Color.FromArgb(255, 20, 20, 24));
+
+    /// <summary>
+    /// 材质预览的底：深色主题配深色壁纸、浅色主题配浅色壁纸 —— 材质演示的本来就是"墙纸透过来多少"，
+    /// 壁纸和岛体主题对不上就看不出在演示什么。
+    /// </summary>
+    private static Brush Wallpaper(bool vivid)
+    {
+        bool light = SystemTheme.IsLight;
+        var stops = vivid
+            ? light
+                ? new[] { Color.FromArgb(255, 127, 178, 240), Color.FromArgb(255, 199, 155, 232), Color.FromArgb(255, 127, 216, 203) }
+                : new[] { Color.FromArgb(255, 47, 111, 224), Color.FromArgb(255, 176, 79, 216), Color.FromArgb(255, 47, 156, 143) }
+            : light
+                ? new[] { Color.FromArgb(255, 214, 220, 231), Color.FromArgb(255, 228, 219, 236) }
+                : new[] { Color.FromArgb(255, 58, 66, 84), Color.FromArgb(255, 78, 62, 92) };
+
+        var brush = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
+        for (int i = 0; i < stops.Length; i++)
+        {
+            brush.GradientStops.Add(new GradientStop
+            {
+                Offset = stops.Length == 1 ? 0 : i / (double)(stops.Length - 1),
+                Color = stops[i],
+            });
+        }
+
+        return brush;
     }
 
-    private static FrameworkElement PreviewFrame(IslandStyleKind style, bool materialApplied, Brush wallpaper)
+    private static FrameworkElement PreviewFrame(IslandStyleKind style, bool materialApplied, Brush wallpaper, bool light)
     {
         var frame = new Grid { Width = 120, Height = 76 };
         frame.Children.Add(new Border
@@ -204,13 +236,13 @@ internal sealed class ChoiceCard
         });
 
         const double height = 30;
-        var stroke = IslandStyle.CreateStroke(style);
+        var stroke = IslandStyle.CreateStroke(style, light);
         var pill = new Border
         {
             Width = 96,
             Height = height,
             CornerRadius = new CornerRadius(IslandStyle.ResolveRadius(style, height, expanded: false)),
-            Background = IslandStyle.CreateSurfaceFill(style, materialApplied),
+            Background = IslandStyle.CreateSurfaceFill(style, materialApplied, light),
             BorderBrush = stroke,
             BorderThickness = stroke == null ? new Thickness(0) : new Thickness(1),
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -233,7 +265,7 @@ internal sealed class ChoiceCard
             Width = 42,
             Height = 5,
             CornerRadius = new CornerRadius(2.5),
-            Background = new SolidColorBrush(Color.FromArgb(170, 255, 255, 255)),
+            Background = new SolidColorBrush(light ? Color.FromArgb(170, 28, 28, 30) : Color.FromArgb(170, 255, 255, 255)),
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(30, 0, 0, 0),
@@ -242,23 +274,6 @@ internal sealed class ChoiceCard
 
         frame.Children.Add(pill);
         return frame;
-    }
-
-    private static Brush VividWallpaper()
-    {
-        var brush = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
-        brush.GradientStops.Add(new GradientStop { Offset = 0, Color = Color.FromArgb(255, 47, 111, 224) });
-        brush.GradientStops.Add(new GradientStop { Offset = 0.55, Color = Color.FromArgb(255, 176, 79, 216) });
-        brush.GradientStops.Add(new GradientStop { Offset = 1, Color = Color.FromArgb(255, 47, 156, 143) });
-        return brush;
-    }
-
-    private static Brush MutedWallpaper()
-    {
-        var brush = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
-        brush.GradientStops.Add(new GradientStop { Offset = 0, Color = Color.FromArgb(255, 58, 66, 84) });
-        brush.GradientStops.Add(new GradientStop { Offset = 1, Color = Color.FromArgb(255, 78, 62, 92) });
-        return brush;
     }
 
     private static Brush ThemeBrush(string key, Color fallback)

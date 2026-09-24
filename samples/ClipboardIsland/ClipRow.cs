@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using WinIsland.Core;
 
 namespace ClipboardIsland;
 
@@ -13,21 +14,32 @@ namespace ClipboardIsland;
 ///
 /// <paramref name="dense"/> 是「紧凑但可点」：大岛展开态只有 168 DIP 高，要塞下 3 行，
 /// 沿用聚光卡那种带内边距的行会撑爆 —— 所以尺寸按紧凑走，只额外提供 hover 与点击。
+///
+/// 配色跟着岛体主题走（浅色岛体上写死白色就是白字压白底）：中性色全部由 <paramref name="theme"/> 决定。
 /// </summary>
 internal sealed class ClipRow : UserControl
 {
-    private static readonly SolidColorBrush TextBrush = new(Windows.UI.Color.FromArgb(235, 255, 255, 255));
-    private static readonly SolidColorBrush HintBrush = new(Windows.UI.Color.FromArgb(125, 255, 255, 255));
-    private static readonly SolidColorBrush GlyphBrush = new(Windows.UI.Color.FromArgb(190, 255, 255, 255));
-    private static readonly SolidColorBrush HoverBrush = new(Windows.UI.Color.FromArgb(26, 255, 255, 255));
+    private readonly SolidColorBrush _textBrush;
+    private readonly SolidColorBrush _hintBrush;
+    private readonly SolidColorBrush _glyphBrush;
+    private readonly SolidColorBrush _hoverBrush;
+    private readonly SolidColorBrush _neutralFill;
     private static readonly SolidColorBrush TransparentBrush = new(Windows.UI.Color.FromArgb(0, 0, 0, 0));
 
     private readonly ClipItem _item;
     private readonly Border _frame;
+    private readonly IIslandTheme _theme;
 
-    public ClipRow(ClipItem item, bool interactive, Action<ClipItem>? invoke, bool dense = false)
+    public ClipRow(ClipItem item, IIslandTheme theme, bool interactive, Action<ClipItem>? invoke, bool dense = false)
     {
         _item = item;
+        _theme = theme;
+
+        _textBrush = new SolidColorBrush(Neutral(theme, 235));
+        _hintBrush = new SolidColorBrush(Neutral(theme, 125));
+        _glyphBrush = new SolidColorBrush(Neutral(theme, 190));
+        _hoverBrush = new SolidColorBrush(Neutral(theme, 26));
+        _neutralFill = new SolidColorBrush(Neutral(theme, 34));
 
         var leadingSize = dense ? 20d : interactive ? 24d : 20d;
         var fontSize = dense ? 12d : interactive ? 12.5 : 12;
@@ -39,7 +51,7 @@ internal sealed class ClipRow : UserControl
         {
             Glyph = item.IsImage ? "\uEB9F" : item.IsFiles ? "\uE8B7" : "\uE8A5",
             FontSize = leadingSize * 0.62,
-            Foreground = GlyphBrush,
+            Foreground = _glyphBrush,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -59,7 +71,7 @@ internal sealed class ClipRow : UserControl
             {
                 CornerRadius = new CornerRadius(5),
                 Opacity = 0,
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(34, 255, 255, 255)),
+                Background = _neutralFill,
                 Child = thumb,
             };
             leading.Children.Add(thumbFrame);
@@ -75,7 +87,7 @@ internal sealed class ClipRow : UserControl
             MaxLines = 1,
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = TextBrush,
+            Foreground = _textBrush,
         };
 
         var time = new TextBlock
@@ -83,7 +95,7 @@ internal sealed class ClipRow : UserControl
             Text = ClipText.Ago(item.CapturedAt),
             FontSize = 11,
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = HintBrush,
+            Foreground = _hintBrush,
         };
 
         var grid = new Grid { ColumnSpacing = dense ? 8 : interactive ? 10 : 8 };
@@ -108,7 +120,7 @@ internal sealed class ClipRow : UserControl
 
         if (interactive)
         {
-            _frame.PointerEntered += (_, _) => _frame.Background = HoverBrush;
+            _frame.PointerEntered += (_, _) => _frame.Background = _hoverBrush;
             _frame.PointerExited += (_, _) => _frame.Background = TransparentBrush;
             _frame.Tapped += (_, e) =>
             {
@@ -123,6 +135,21 @@ internal sealed class ClipRow : UserControl
     }
 
     public ClipItem Item => _item;
+
+    /// <summary>岛体换主题时就地重刷中性色（视图颜色烘在画刷里，不重刷会留在旧主题）。</summary>
+    internal void RefreshTheme()
+    {
+        _textBrush.Color = Neutral(_theme, 235);
+        _hintBrush.Color = Neutral(_theme, 125);
+        _glyphBrush.Color = Neutral(_theme, 190);
+        _hoverBrush.Color = Neutral(_theme, 26);
+        _neutralFill.Color = Neutral(_theme, 34);
+    }
+
+    /// <summary>中性色：岛体深色时是白色系，浅色（Fluent + 浅色系统）时是黑色系。</summary>
+    private static Windows.UI.Color Neutral(IIslandTheme theme, byte alpha) => theme.IsLight
+        ? Windows.UI.Color.FromArgb(alpha, 0, 0, 0)
+        : Windows.UI.Color.FromArgb(alpha, 255, 255, 255);
 
     private static async Task FillThumbnailAsync(Image target, Border frame, FontIcon glyph, string path, int decodeWidth)
     {

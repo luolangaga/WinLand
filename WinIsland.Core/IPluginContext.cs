@@ -12,6 +12,10 @@ public interface IPluginContext
     IPluginLogger Log { get; }
     ISettingsStore Settings { get; }
     IIslandSurface Island { get; }
+
+    /// <summary>岛体当前的明暗主题（Fluent 跟随系统，Apple 恒为深色）。见 <see cref="IIslandTheme"/>。</summary>
+    IIslandTheme Theme { get; }
+
     IDisposable Register(IDisposable disposable);
     IDisposable OnSettingsChanged(string key, Action handler);
     IDisposable CreateTimer(TimeSpan interval, bool repeat, Action tick);

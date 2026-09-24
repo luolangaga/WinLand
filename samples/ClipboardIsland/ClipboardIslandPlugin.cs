@@ -63,6 +63,17 @@ public sealed class ClipboardIslandPlugin : IslandPluginBase
 
     private bool _stopped;
 
+    /// <summary>
+    /// 岛体换主题：岛视图就地重刷配色；聚光卡下次打开时自然会按新主题重建
+    /// （它是另一棵可视树，正在屏幕上开着的话留着旧配色直到收起，不值得为它做热替换）。
+    /// </summary>
+    private void OnThemeChanged()
+    {
+        Log.Info($"岛体主题已切换为{(Theme.IsLight ? "浅色" : "深色")}，重刷岛视图配色。");
+        _view?.RefreshTheme();
+        _spotlight = null;
+    }
+
     protected override Task OnInitializeAsync()
     {
         _stopped = false;
@@ -73,8 +84,11 @@ public sealed class ClipboardIslandPlugin : IslandPluginBase
         Context.Register(new ActionDisposable(() => _history.Changed -= OnHistoryChanged));
         Context.Register(new ActionDisposable(() => _stopped = true));
 
-        _view = new ClipboardIslandView(Manifest, Activate);
+        _view = new ClipboardIslandView(Manifest, Activate, Theme);
         _view.Apply(_history.Items);
+        // 岛体换主题（Fluent 跟随系统明暗）：代码搭的视图颜色烘在画刷里，就地重刷一遍
+        Context.Theme.Changed += OnThemeChanged;
+        Context.Register(new ActionDisposable(() => Context.Theme.Changed -= OnThemeChanged));
 
         _content = new IslandLiveContent
         {
@@ -383,7 +397,7 @@ public sealed class ClipboardIslandPlugin : IslandPluginBase
     /// </summary>
     private void OpenSpotlight()
     {
-        _spotlight ??= new ClipboardSpotlightView(Manifest, Activate, () => ClearHistory());
+        _spotlight ??= new ClipboardSpotlightView(Manifest, Activate, () => ClearHistory(), Theme);
         _spotlight.Refresh(_history.Items);
 
         Context.Island.OpenSpotlight(new IslandSpotlight

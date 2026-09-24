@@ -197,5 +197,8 @@ public sealed class HardwareSettingsPage : UserControl
         Child = child,
     };
 
-    private static SolidColorBrush Hint(byte alpha) => new(Windows.UI.Color.FromArgb(alpha, 255, 255, 255));
+    /// <summary>次级文字：设置窗跟随应用主题，浅色窗里必须用深色（写死白色等于看不见）。</summary>
+    private static SolidColorBrush Hint(byte alpha) => new(Application.Current.RequestedTheme == ApplicationTheme.Light
+        ? Windows.UI.Color.FromArgb(alpha, 0, 0, 0)
+        : Windows.UI.Color.FromArgb(alpha, 255, 255, 255));
 }

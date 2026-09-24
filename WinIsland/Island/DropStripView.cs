@@ -62,6 +62,7 @@ internal sealed class DropStripView
 
     private readonly IslandStyleKind _style;
     private readonly bool _materialApplied;
+    private readonly bool _light;
 
     private readonly FontIcon _summaryGlyph;
     private readonly Image _summaryThumb;
@@ -80,16 +81,17 @@ internal sealed class DropStripView
     private int _payloadVersion;
     private int _armedIndex = -1;
 
-    public DropStripView(IslandStyleKind style, bool materialApplied)
+    public DropStripView(IslandStyleKind style, bool materialApplied, bool light)
     {
         _style = style;
         _materialApplied = materialApplied;
+        _light = light;
 
         _summaryGlyph = new FontIcon
         {
             Glyph = "\uE7C3",
             FontSize = 18,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(230, 255, 255, 255)),
+            Foreground = IslandStyle.CreatePanelSecondaryBrush(light),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -118,7 +120,7 @@ internal sealed class DropStripView
             Text = "拖放内容",
             FontSize = 12.5,
             FontWeight = FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(240, 255, 255, 255)),
+            Foreground = IslandStyle.CreatePanelTextBrush(light),
             TextWrapping = TextWrapping.Wrap,
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxLines = 2,
@@ -129,7 +131,7 @@ internal sealed class DropStripView
         {
             Text = "拖到卡片上松开",
             FontSize = 11,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(140, 255, 255, 255)),
+            Foreground = IslandStyle.CreatePanelHintBrush(light),
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxLines = 1,
         };
@@ -224,7 +226,7 @@ internal sealed class DropStripView
 
         foreach (var (_, target) in targets)
         {
-            var tile = new DropTile(target, _style, _materialApplied);
+            var tile = new DropTile(target, _style, _materialApplied, _light);
             _tiles.Add(tile);
             _tilePanel.Children.Add(tile.Root);
         }
@@ -470,9 +472,10 @@ internal sealed class DropStripView
     private Border BuildEdgeFade(bool leftAligned)
     {
         var brush = new LinearGradientBrush { StartPoint = new Point(leftAligned ? 0 : 1, 0.5), EndPoint = new Point(leftAligned ? 1 : 0, 0.5) };
-        // 从岛体底色黑过渡到透明：Apple 是纯黑胶囊，Fluent 是半透明深色薄纱，这里用中性黑两档就够
-        brush.GradientStops.Add(new GradientStop { Color = Windows.UI.Color.FromArgb(230, 0, 0, 0), Offset = 0 });
-        brush.GradientStops.Add(new GradientStop { Color = Windows.UI.Color.FromArgb(0, 0, 0, 0), Offset = 1 });
+        // 从面板底色（深色主题的黑、浅色主题的白）过渡到同色透明，和材质/胶囊底衬同一套规则
+        var fade = IslandStyle.PanelEdgeFadeColor(_light);
+        brush.GradientStops.Add(new GradientStop { Color = fade, Offset = 0 });
+        brush.GradientStops.Add(new GradientStop { Color = Windows.UI.Color.FromArgb(0, fade.R, fade.G, fade.B), Offset = 1 });
 
         return new Border
         {
@@ -545,16 +548,16 @@ internal sealed class DropStripView
         private readonly ScaleTransform _scale = new();
         private readonly IslandDropTarget _target;
 
-        public DropTile(IslandDropTarget target, IslandStyleKind style, bool materialApplied)
+        public DropTile(IslandDropTarget target, IslandStyleKind style, bool materialApplied, bool light)
         {
             _target = target;
             double radius = IslandStyle.ResolveDropTileRadius(style, TileHeight);
-            var stroke = IslandStyle.CreateDropTileStroke(style);
+            var stroke = IslandStyle.CreateDropTileStroke(style, light);
 
             _highlight = new Border
             {
                 CornerRadius = new CornerRadius(radius),
-                Background = IslandStyle.CreateDropTileHighlight(style, target.AccentColor),
+                Background = IslandStyle.CreateDropTileHighlight(style, target.AccentColor, light),
                 Opacity = 0,
             };
 
@@ -562,14 +565,14 @@ internal sealed class DropStripView
             {
                 Glyph = target.Glyph,
                 FontSize = 19,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(235, 255, 255, 255)),
+                Foreground = IslandStyle.CreatePanelSecondaryBrush(light),
             };
 
             var label = new TextBlock
             {
                 Text = target.Title,
                 FontSize = 11.5,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(215, 255, 255, 255)),
+                Foreground = IslandStyle.CreatePanelTextBrush(light),
                 TextWrapping = TextWrapping.Wrap,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 TextAlignment = TextAlignment.Center,
@@ -596,7 +599,7 @@ internal sealed class DropStripView
                 Width = TileWidth,
                 Height = TileHeight,
                 CornerRadius = new CornerRadius(radius),
-                Background = IslandStyle.CreateDropTileFill(style, materialApplied),
+                Background = IslandStyle.CreateDropTileFill(style, materialApplied, light),
                 BorderBrush = stroke,
                 BorderThickness = stroke == null ? new Thickness(0) : new Thickness(1),
                 Child = content,

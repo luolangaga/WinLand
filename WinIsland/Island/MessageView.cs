@@ -39,15 +39,15 @@ internal static class MessageView
     public static readonly Size MaxSize = new(MaxWidth, MaxHeight);
 
     /// <summary>按内容建视图，并返回它需要的岛体尺寸（同宽同高，可直接交给尺寸动画）。</summary>
-    public static (UIElement View, Size Size) Build(IslandMessage msg, IslandStyleKind style)
+    public static (UIElement View, Size Size) Build(IslandMessage msg, IslandStyleKind style, bool light)
     {
-        var stroke = IslandStyle.CreateMessageChipStroke(style);
+        var stroke = IslandStyle.CreateMessageChipStroke(style, light);
         var chip = new Border
         {
             Width = ChipSize,
             Height = ChipSize,
             CornerRadius = new CornerRadius(IslandStyle.ResolveMessageChipRadius(style, ChipSize)),
-            Background = IslandStyle.CreateMessageChipFill(style, msg.AccentColor),
+            Background = IslandStyle.CreateMessageChipFill(style, msg.AccentColor, light),
             BorderBrush = stroke,
             BorderThickness = stroke == null ? new Thickness(0) : new Thickness(1),
             VerticalAlignment = VerticalAlignment.Center,
@@ -55,7 +55,7 @@ internal static class MessageView
             {
                 Glyph = msg.Glyph,
                 FontSize = ChipGlyphSize,
-                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                Foreground = new SolidColorBrush(IslandStyle.MessageChipGlyphColor(msg.AccentColor, light)),
             },
         };
 
@@ -64,7 +64,7 @@ internal static class MessageView
             Text = msg.Title,
             FontSize = TitleSize,
             FontWeight = FontWeights.SemiBold,
-            Foreground = IslandStyle.CreateMessageTitleBrush(),
+            Foreground = IslandStyle.CreateMessageTitleBrush(light),
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxLines = 1,
         };
@@ -82,7 +82,7 @@ internal static class MessageView
             {
                 Text = msg.Text.Trim(),
                 FontSize = TextSize,
-                Foreground = IslandStyle.CreateMessageTextBrush(),
+                Foreground = IslandStyle.CreateMessageTextBrush(light),
                 TextWrapping = TextWrapping.Wrap,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 MaxLines = 2,

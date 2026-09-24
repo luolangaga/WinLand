@@ -134,7 +134,8 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
         sb.Completed += (_, _) =>
         {
             Title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
-            Title.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White);
+            // 展开态标题亮一档：换 Style 而不是赋画刷，颜色才继续跟着主题走
+            Title.Style = (Style)Resources["TitleExpandedStyle"];
             if (ViewModel.GlowEnabled)
                 GlowLayer.Opacity = 1;
             SyncGlow();
@@ -201,8 +202,7 @@ public sealed partial class MediaIslandView : UserControl, IMorphView
         sb.Completed += (_, _) =>
         {
             Title.FontWeight = Microsoft.UI.Text.FontWeights.Normal;
-            Title.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
-                Windows.UI.Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF));
+            Title.Style = (Style)Resources["TitleCompactStyle"];
             SyncBars();
             _progressTimer.Stop();
         };

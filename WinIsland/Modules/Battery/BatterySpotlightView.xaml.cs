@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using WinIsland.Core;
 
 namespace WinIsland.Modules.Battery;
 
@@ -28,10 +29,12 @@ public sealed partial class BatterySpotlightView : UserControl
     private double _ringTarget = 100;
     private int _ticks;
     private int _sampledPercent = -1;
+    private readonly IIslandTheme _theme;
 
-    internal BatterySpotlightView(BatteryViewModel viewModel)
+    internal BatterySpotlightView(BatteryViewModel viewModel, IIslandTheme theme)
     {
         ViewModel = viewModel;
+        _theme = theme;
         InitializeComponent();
 
         Loaded += (_, _) =>
@@ -43,6 +46,14 @@ public sealed partial class BatterySpotlightView : UserControl
     }
 
     public BatteryViewModel ViewModel { get; }
+
+    /// <summary>
+    /// 数值的中性色（读不到数据时的 "—"）：跟着岛体主题走 ——
+    /// 浅色聚光卡上再用白字就等于没写。明暗两档与宿主的主文字同一档。
+    /// </summary>
+    private Brush NeutralText => new SolidColorBrush(_theme.IsLight
+        ? Windows.UI.Color.FromArgb(255, 28, 28, 30)
+        : Microsoft.UI.Colors.White);
 
     private void StartTick()
     {
@@ -148,7 +159,7 @@ public sealed partial class BatterySpotlightView : UserControl
         {
             ValuePowerLabel.Text = "充电功率";
             ValuePowerText.Text = "—";
-            ValuePowerText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
+            ValuePowerText.Foreground = NeutralText;
         }
 
         ValueRemainingText.Text = info.RemainingCapacityMwh is { } remaining
@@ -166,7 +177,7 @@ public sealed partial class BatterySpotlightView : UserControl
         else
         {
             ValueHealthText.Text = "—";
-            ValueHealthText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
+            ValueHealthText.Foreground = NeutralText;
         }
 
         ValueCycleText.Text = info.CycleCount is { } cycles ? $"{cycles} 次" : "—";

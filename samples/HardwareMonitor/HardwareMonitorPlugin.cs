@@ -22,7 +22,7 @@ public sealed class HardwareMonitorPlugin : IslandPluginBase
             Settings.Get("device.gpu", 0),
             Settings.Get("device.net", 0));
 
-        _view = new HardwareMonitorView();
+        _view = new HardwareMonitorView(Theme);
         _compactOptions = ReadCompactOptions();
         _content = BuildContent();
         _enabled = Settings.Get("enabled", true);

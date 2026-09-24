@@ -8,13 +8,34 @@
     mc:Ignorable="d">
 
     <UserControl.Resources>
-        <Style x:Key="TransportButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="Padding" Value="10" />
-            <Setter Property="CornerRadius" Value="20" />
-        </Style>
+        <ResourceDictionary>
+            <!-- 岛体在浅色主题（Fluent）下是浅底，插件自己的中性色也必须成对给出：
+                 只写死一套白色，浅色岛上就是白字压白底（文字直接用系统画刷，见下方 ThemeResource） -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="MediaNeutralFillBrush" Color="#33000000" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="MediaNeutralFillBrush" Color="#33FFFFFF" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+            <Style x:Key="TransportButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                <Setter Property="Padding" Value="10" />
+                <Setter Property="CornerRadius" Value="20" />
+            </Style>
+            <!-- 标题的两个档位：展开态更亮一档，代码里按形态切换 Style。
+                 颜色必须留在 Style 里走 ThemeResource —— 代码里直接赋 Foreground 会打断主题引用，
+                 浅色主题下就变成白字压白底。 -->
+            <Style x:Key="TitleCompactStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Style>
+            <Style x:Key="TitleExpandedStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+            </Style>
+        </ResourceDictionary>
     </UserControl.Resources>
 
     <!-- 单一变形视图：所有元素常驻可视树，
@@ -84,13 +105,13 @@
                 Height="26"
                 HorizontalAlignment="Left"
                 VerticalAlignment="Center"
-                Background="#33FFFFFF"
+                Background="{ThemeResource MediaNeutralFillBrush}"
                 CornerRadius="7">
                 <Grid>
                     <FontIcon
                         x:Name="PlaceholderIcon"
                         FontSize="12"
-                        Foreground="White"
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                         Glyph="&#xE8D6;"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
@@ -110,7 +131,7 @@
                 <TextBlock
                     x:Name="Title"
                     FontSize="12"
-                    Foreground="#D9FFFFFF"
+                    Style="{StaticResource TitleCompactStyle}"
                     MaxLines="1"
                     Text="{x:Bind ViewModel.Title, Mode=OneWay}"
                     TextTrimming="CharacterEllipsis" />
@@ -118,7 +139,7 @@
                     x:Name="Artist"
                     Height="0"
                     FontSize="13"
-                    Foreground="#99FFFFFF"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     MaxLines="1"
                     Opacity="0"
                     Text="{x:Bind ViewModel.Artist, Mode=OneWay}"
@@ -140,7 +161,7 @@
                     <TextBlock
                         x:Name="SourceAppText"
                         FontSize="10"
-                        Foreground="#80FFFFFF"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                         MaxLines="1"
                         Text="{x:Bind ViewModel.SourceAppName, Mode=OneWay}"
                         TextTrimming="CharacterEllipsis"
@@ -243,7 +264,7 @@
                 x:Name="PositionText"
                 Grid.Column="0"
                 FontSize="10"
-                Foreground="#80FFFFFF"
+                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                 VerticalAlignment="Center"
                 Text="{x:Bind ViewModel.PositionText, Mode=OneWay}" />
             <Grid
@@ -260,7 +281,7 @@
                 <Border
                     Height="4"
                     VerticalAlignment="Center"
-                    Background="#33FFFFFF"
+                    Background="{ThemeResource MediaNeutralFillBrush}"
                     CornerRadius="2" />
                 <Border
                     x:Name="ProgressFill"
@@ -276,14 +297,14 @@
                     Height="9"
                     HorizontalAlignment="Left"
                     VerticalAlignment="Center"
-                    Fill="White"
+                    Fill="{ThemeResource TextFillColorPrimaryBrush}"
                     Visibility="Collapsed" />
             </Grid>
             <TextBlock
                 x:Name="DurationText"
                 Grid.Column="2"
                 FontSize="10"
-                Foreground="#80FFFFFF"
+                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                 VerticalAlignment="Center"
                 Text="{x:Bind ViewModel.DurationText, Mode=OneWay}" />
         </Grid>

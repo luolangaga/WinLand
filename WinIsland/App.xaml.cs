@@ -57,6 +57,8 @@ public partial class App : Application
         {
             _settings = new SettingsService();
             _island = new IslandWindow(_settings, _logs);
+            // 岛的 Fluent 配色跟随系统明暗主题：进程存活期间的切换也要生效，所以从启动就开始监听
+            SystemTheme.Start(_island.DispatcherQueue);
             _service = new IslandService(_island, _settings, _logs.Host);
             _service.SettingsOpenRequested += OpenSettingsWindow;
 

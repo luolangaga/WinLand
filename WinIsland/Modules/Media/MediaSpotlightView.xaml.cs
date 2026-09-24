@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
+using WinIsland.Core;
 
 namespace WinIsland.Modules.Media;
 
@@ -24,6 +25,7 @@ public sealed partial class MediaSpotlightView : UserControl
 
     private readonly LyricsService? _lyrics;
     private readonly AudioLevelMonitor? _levels;
+    private readonly IIslandTheme _theme;
     private readonly List<TextBlock> _lines = new();
     private readonly Rectangle[] _bars;
 
@@ -36,12 +38,17 @@ public sealed partial class MediaSpotlightView : UserControl
     private Storyboard? _scrollStoryboard;
     private bool _dragging;
 
-    internal MediaSpotlightView(MediaViewModel viewModel, LyricsService? lyrics, AudioLevelMonitor? levels)
+    internal MediaSpotlightView(MediaViewModel viewModel, LyricsService? lyrics, AudioLevelMonitor? levels, IIslandTheme theme)
     {
         ViewModel = viewModel;
         _lyrics = lyrics;
         _levels = levels;
+        _theme = theme;
         InitializeComponent();
+
+        // 歌词行是代码建的，颜色烘在画刷里：主题一变就重刷一遍。
+        // 视图活得跟插件一样久，主题对象也是，所以这里不需要退订。
+        _theme.Changed += OnThemeChanged;
 
         _bars = new[] { EqBar0, EqBar1, EqBar2, EqBar3, EqBar4 };
 
@@ -56,6 +63,22 @@ public sealed partial class MediaSpotlightView : UserControl
     }
 
     public MediaViewModel ViewModel { get; }
+
+    /// <summary>
+    /// 歌词行的中性色：跟着岛体主题走 —— 浅色卡片（Fluent + 浅色系统）上再用白字就等于没写。
+    /// 明暗两档与宿主的次级文字同一档。
+    /// </summary>
+    private Brush LyricBrush => new SolidColorBrush(_theme.IsLight
+        ? Windows.UI.Color.FromArgb(255, 28, 28, 30)
+        : Microsoft.UI.Colors.White);
+
+    private void OnThemeChanged()
+    {
+        foreach (var line in _lines)
+        {
+            line.Foreground = LyricBrush;
+        }
+    }
 
     /// <summary>宿主收起卡片时调用：停表并取消还没回来的歌词请求。</summary>
     public void OnHostClosed()
@@ -175,7 +198,7 @@ public sealed partial class MediaSpotlightView : UserControl
                 Height = LinePitch,
                 FontSize = 16,
                 FontWeight = Microsoft.UI.Text.FontWeights.Normal,
-                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                Foreground = LyricBrush,
                 MaxLines = 2,
                 Opacity = 0,
                 TextAlignment = TextAlignment.Left,

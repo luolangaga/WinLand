@@ -8,13 +8,26 @@
     mc:Ignorable="d">
 
     <UserControl.Resources>
-        <Style x:Key="SpotlightTransportButton" TargetType="Button">
-            <Setter Property="Background" Value="#14FFFFFF" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="CornerRadius" Value="22" />
-        </Style>
+        <ResourceDictionary>
+            <!-- 聚光卡在浅色主题下是浅底，插件自己的中性色必须成对给出（文字用系统画刷，见下方 ThemeResource） -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="SpotlightNeutralFillBrush" Color="#26000000" />
+                    <SolidColorBrush x:Key="SpotlightSubtleFillBrush" Color="#14000000" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="SpotlightNeutralFillBrush" Color="#26FFFFFF" />
+                    <SolidColorBrush x:Key="SpotlightSubtleFillBrush" Color="#14FFFFFF" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+            <Style x:Key="SpotlightTransportButton" TargetType="Button">
+                <Setter Property="Background" Value="{ThemeResource SpotlightSubtleFillBrush}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="CornerRadius" Value="22" />
+            </Style>
+        </ResourceDictionary>
     </UserControl.Resources>
 
     <!-- 音乐超级展开卡：左封面 + 右歌词流，底部播控与可拖动进度。
@@ -56,12 +69,12 @@
                     Height="228"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    Background="#26FFFFFF"
+                    Background="{ThemeResource SpotlightNeutralFillBrush}"
                     CornerRadius="20">
                     <Grid>
                         <FontIcon
                             FontSize="56"
-                            Foreground="#59FFFFFF"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                             Glyph="&#xE8D6;"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center"
@@ -78,7 +91,7 @@
                 Grid.Row="1"
                 FontSize="22"
                 FontWeight="SemiBold"
-                Foreground="#F2FFFFFF"
+                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                 MaxLines="2"
                 Text="{x:Bind ViewModel.Title, Mode=OneWay}"
                 TextTrimming="CharacterEllipsis"
@@ -87,7 +100,7 @@
                 Grid.Row="2"
                 Margin="0,6,0,0"
                 FontSize="14"
-                Foreground="#B8FFFFFF"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 MaxLines="1"
                 Text="{x:Bind ViewModel.Artist, Mode=OneWay}"
                 TextTrimming="CharacterEllipsis" />
@@ -95,7 +108,7 @@
                 Grid.Row="3"
                 Margin="0,3,0,0"
                 FontSize="12"
-                Foreground="#8AFFFFFF"
+                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                 MaxLines="1"
                 Text="{x:Bind ViewModel.AlbumTitle, Mode=OneWay}"
                 TextTrimming="CharacterEllipsis" />
@@ -113,7 +126,7 @@
                     Visibility="{x:Bind ViewModel.SourceAppIconVisibility, Mode=OneWay}" />
                 <TextBlock
                     FontSize="12"
-                    Foreground="#80FFFFFF"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     MaxLines="1"
                     Text="{x:Bind ViewModel.SourceAppName, Mode=OneWay}"
                     TextTrimming="CharacterEllipsis" />
@@ -162,7 +175,7 @@
                         x:Name="LyricsStatus"
                         HorizontalAlignment="Center"
                         FontSize="14"
-                        Foreground="#73FFFFFF"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                         Text="正在获取歌词…" />
                 </StackPanel>
             </Grid>
@@ -233,7 +246,7 @@
                     Grid.Column="0"
                     VerticalAlignment="Center"
                     FontSize="11"
-                    Foreground="#80FFFFFF"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Text="{x:Bind ViewModel.PositionText, Mode=OneWay}" />
                 <Grid
                     x:Name="ProgressArea"
@@ -247,7 +260,7 @@
                     <Border
                         Height="5"
                         VerticalAlignment="Center"
-                        Background="#26FFFFFF"
+                        Background="{ThemeResource SpotlightNeutralFillBrush}"
                         CornerRadius="2.5" />
                     <Border
                         x:Name="ProgressFill"
@@ -263,14 +276,14 @@
                         Height="13"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
-                        Fill="White"
+                        Fill="{ThemeResource TextFillColorPrimaryBrush}"
                         Visibility="Collapsed" />
                 </Grid>
                 <TextBlock
                     Grid.Column="2"
                     VerticalAlignment="Center"
                     FontSize="11"
-                    Foreground="#80FFFFFF"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Text="{x:Bind ViewModel.DurationText, Mode=OneWay}" />
             </Grid>
         </Grid>

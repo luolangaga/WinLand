@@ -305,7 +305,8 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
         sb.Completed += (_, _) =>
         {
             PercentText.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
-            PercentText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
+            // 展开态更亮一档：换 Style 而不是赋画刷，颜色才继续跟着主题走
+            PercentText.Style = (Style)Resources["PercentExpandedStyle"];
             if (ViewModel.IsCharging)
                 GlowLayer.Opacity = 1;
             SyncGlow();
@@ -358,8 +359,7 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
         sb.Completed += (_, _) =>
         {
             PercentText.FontWeight = Microsoft.UI.Text.FontWeights.Normal;
-            PercentText.Foreground = new SolidColorBrush(
-                Windows.UI.Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF));
+            PercentText.Style = (Style)Resources["PercentCompactStyle"];
             if (ViewModel.IsCharging)
                 PlayChargingLabelAnimation();
         };

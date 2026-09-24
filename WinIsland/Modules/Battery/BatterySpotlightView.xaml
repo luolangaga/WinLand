@@ -7,6 +7,22 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <!-- 聚光卡在浅色主题下是浅底，插件自己的中性色必须成对给出（文字用系统画刷，见下方 ThemeResource） -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="SpotlightRingTrackBrush" Color="#26000000" />
+                    <SolidColorBrush x:Key="SpotlightDividerBrush" Color="#14000000" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="SpotlightRingTrackBrush" Color="#26FFFFFF" />
+                    <SolidColorBrush x:Key="SpotlightDividerBrush" Color="#14FFFFFF" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
     <!-- 电池超级展开卡：左侧大进度环 + 右侧高级信息（容量/健康/循环/电压/预计时间）。
          数值都在代码里填，读不到的项显示 "—"。 -->
     <Grid Padding="28,26,28,22" ColumnSpacing="32">
@@ -41,7 +57,7 @@
                     Height="202"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    Stroke="#26FFFFFF"
+                    Stroke="{ThemeResource SpotlightRingTrackBrush}"
                     StrokeThickness="15" />
                 <Ellipse
                     x:Name="FgRing"
@@ -67,7 +83,7 @@
                         HorizontalAlignment="Center"
                         FontSize="50"
                         FontWeight="SemiBold"
-                        Foreground="White"
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                         Text="{x:Bind ViewModel.PercentText, Mode=OneWay}" />
                 </StackPanel>
             </Grid>
@@ -79,7 +95,7 @@
                 HorizontalAlignment="Center"
                 FontSize="14"
                 FontWeight="SemiBold"
-                Foreground="#CCFFFFFF"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 Text="—"
                 TextAlignment="Center"
                 TextWrapping="Wrap" />
@@ -108,7 +124,7 @@
                     x:Name="ValuePowerLabel"
                     VerticalAlignment="Center"
                     FontSize="13"
-                    Foreground="#80FFFFFF"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Text="充电功率" />
                 <TextBlock
                     x:Name="ValuePowerText"
@@ -119,12 +135,12 @@
                     Foreground="#FF6CCB5F"
                     Text="—" />
             </Grid>
-            <Border Height="1" Background="#14FFFFFF" />
+            <Border Height="1" Background="{ThemeResource SpotlightDividerBrush}" />
             <Grid Height="38">
                 <TextBlock
                     VerticalAlignment="Center"
                     FontSize="13"
-                    Foreground="#80FFFFFF"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Text="剩余容量" />
                 <TextBlock
                     x:Name="ValueRemainingText"
@@ -132,15 +148,15 @@
                     VerticalAlignment="Center"
                     FontSize="15"
                     FontWeight="SemiBold"
-                    Foreground="White"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Text="—" />
             </Grid>
-            <Border Height="1" Background="#14FFFFFF" />
+            <Border Height="1" Background="{ThemeResource SpotlightDividerBrush}" />
             <Grid Height="38">
                 <TextBlock
                     VerticalAlignment="Center"
                     FontSize="13"
-                    Foreground="#80FFFFFF"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Text="满充容量" />
                 <TextBlock
                     x:Name="ValueFullText"
@@ -148,15 +164,15 @@
                     VerticalAlignment="Center"
                     FontSize="15"
                     FontWeight="SemiBold"
-                    Foreground="White"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Text="—" />
             </Grid>
-            <Border Height="1" Background="#14FFFFFF" />
+            <Border Height="1" Background="{ThemeResource SpotlightDividerBrush}" />
             <Grid Height="38">
                 <TextBlock
                     VerticalAlignment="Center"
                     FontSize="13"
-                    Foreground="#80FFFFFF"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Text="设计容量" />
                 <TextBlock
                     x:Name="ValueDesignText"
@@ -164,15 +180,15 @@
                     VerticalAlignment="Center"
                     FontSize="15"
                     FontWeight="SemiBold"
-                    Foreground="White"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Text="—" />
             </Grid>
-            <Border Height="1" Background="#14FFFFFF" />
+            <Border Height="1" Background="{ThemeResource SpotlightDividerBrush}" />
             <Grid Height="38">
                 <TextBlock
                     VerticalAlignment="Center"
                     FontSize="13"
-                    Foreground="#80FFFFFF"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Text="电池健康" />
                 <TextBlock
                     x:Name="ValueHealthText"
@@ -180,15 +196,15 @@
                     VerticalAlignment="Center"
                     FontSize="15"
                     FontWeight="SemiBold"
-                    Foreground="White"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Text="—" />
             </Grid>
-            <Border Height="1" Background="#14FFFFFF" />
+            <Border Height="1" Background="{ThemeResource SpotlightDividerBrush}" />
             <Grid Height="38">
                 <TextBlock
                     VerticalAlignment="Center"
                     FontSize="13"
-                    Foreground="#80FFFFFF"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Text="循环次数" />
                 <TextBlock
                     x:Name="ValueCycleText"
@@ -196,15 +212,15 @@
                     VerticalAlignment="Center"
                     FontSize="15"
                     FontWeight="SemiBold"
-                    Foreground="White"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Text="—" />
             </Grid>
-            <Border Height="1" Background="#14FFFFFF" />
+            <Border Height="1" Background="{ThemeResource SpotlightDividerBrush}" />
             <Grid Height="38">
                 <TextBlock
                     VerticalAlignment="Center"
                     FontSize="13"
-                    Foreground="#80FFFFFF"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Text="电池电压" />
                 <TextBlock
                     x:Name="ValueVoltageText"
@@ -212,16 +228,16 @@
                     VerticalAlignment="Center"
                     FontSize="15"
                     FontWeight="SemiBold"
-                    Foreground="White"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Text="—" />
             </Grid>
-            <Border Height="1" Background="#14FFFFFF" />
+            <Border Height="1" Background="{ThemeResource SpotlightDividerBrush}" />
             <Grid Height="38">
                 <TextBlock
                     x:Name="ValueTimeLabel"
                     VerticalAlignment="Center"
                     FontSize="13"
-                    Foreground="#80FFFFFF"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Text="预计充满" />
                 <TextBlock
                     x:Name="ValueTimeText"
@@ -229,7 +245,7 @@
                     VerticalAlignment="Center"
                     FontSize="15"
                     FontWeight="SemiBold"
-                    Foreground="White"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Text="—" />
             </Grid>
         </StackPanel>

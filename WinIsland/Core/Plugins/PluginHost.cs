@@ -1,5 +1,6 @@
 using Microsoft.UI.Dispatching;
 using WinIsland.Core;
+using WinIsland.Island;
 
 namespace WinIsland.Core.Plugins;
 
@@ -16,6 +17,11 @@ public sealed class PluginHost
         Dispatcher = dispatcher;
         Logs = logs ?? new PluginLogService();
         PluginsDirectory = IslandSdk.GetPluginsDirectory(AppContext.BaseDirectory);
+
+        // 岛体生效主题由「外观风格 + 系统明暗」两处决定，两个来源都要盯：
+        // 风格切到 Fluent 时即使系统主题没动，岛的明暗也会变，插件得跟着走
+        SystemTheme.Changed += OnIslandThemeSourceChanged;
+        Settings.Changed += OnSettingChanged;
     }
 
     public PluginLogService Logs { get; }
@@ -239,6 +245,9 @@ public sealed class PluginHost
 
     public void Dispose()
     {
+        SystemTheme.Changed -= OnIslandThemeSourceChanged;
+        Settings.Changed -= OnSettingChanged;
+
         foreach (var instance in _instances.ToList())
         {
             try
@@ -267,6 +276,34 @@ public sealed class PluginHost
             instance.Fault("运行", $"累计 {PluginInstance.MaxErrorsBeforeDisable} 次未处理异常，已自动停用。");
             PluginsChanged?.Invoke();
         });
+    }
+
+    private void OnIslandThemeSourceChanged() => DispatchThemeChange();
+
+    private void OnSettingChanged(string key)
+    {
+        if (string.Equals(key, IslandStyle.StyleKey, StringComparison.Ordinal))
+        {
+            DispatchThemeChange();
+        }
+    }
+
+    /// <summary>
+    /// 岛体生效主题（外观风格 + 系统主题）可能变了：广播给所有插件，让代码里搭视图的插件换掉配色。
+    /// 必须在 UI 线程发 —— 插件会在回调里改 UI（换画刷、重建视图）；<see cref="PluginTheme"/> 自己判断有没有真变。
+    /// </summary>
+    private void DispatchThemeChange()
+    {
+        if (!Dispatcher.HasThreadAccess)
+        {
+            Dispatcher.TryEnqueue(DispatchThemeChange);
+            return;
+        }
+
+        foreach (var instance in _instances.ToList())
+        {
+            instance.ApplyTheme();
+        }
     }
 
     private void RegisterBuiltIns()

@@ -36,11 +36,33 @@ public sealed class HelloPlugin : IslandPluginBase
             _enabled = Settings.Get("enabled", true);
             SetContent(_enabled ? _content : null);
         });
+        // 岛体换主题（Fluent 跟随系统明暗）：代码里搭的视图颜色是烘进画刷的，重建一份最省事。
+        // XAML 视图不用这么做 —— 里面的 {ThemeResource ...} 自己会跟着换。
+        Context.Theme.Changed += OnThemeChanged;
+        Context.Register(new ActionDisposable(() => Context.Theme.Changed -= OnThemeChanged));
         Context.Register(new ActionDisposable(() => Log.Info("注册项已全部撤销（scope 清理完成）")));
 
         Log.Info("初始化完成，常驻内容已注册");
         return Task.CompletedTask;
     }
+
+    private void OnThemeChanged()
+    {
+        Log.Info($"岛体主题已切换为{(Theme.IsLight ? "浅色" : "深色")}，重建岛体内容。");
+        _content = BuildContent();
+        if (_enabled)
+        {
+            SetContent(_content);
+        }
+    }
+
+    /// <summary>
+    /// 岛体内容的中性文字色：Fluent + 浅色系统下岛体是浅底，写死白色就是白字压白底。
+    /// 设置页不走这里 —— 设置窗有自己的主题，那边用应用资源里的系统画刷。
+    /// </summary>
+    private SolidColorBrush IslandText(byte alpha) => new(Theme.IsLight
+        ? Windows.UI.Color.FromArgb(alpha, 0, 0, 0)
+        : Windows.UI.Color.FromArgb(alpha, 255, 255, 255));
 
     protected override Task OnShutdownAsync()
     {
@@ -64,8 +86,8 @@ public sealed class HelloPlugin : IslandPluginBase
 
     private IslandLiveContent BuildContent()
     {
-        _compactText = NewText("运行中 · 0 次心跳");
-        _expandedText = NewText("已运行 0 个心跳周期");
+        _compactText = NewText($"运行中 · {_ticks} 次心跳");
+        _expandedText = NewText($"已运行 {_ticks} 个心跳周期");
 
         var icon = new FontIcon
         {
@@ -95,13 +117,13 @@ public sealed class HelloPlugin : IslandPluginBase
             Text = Manifest.Name,
             FontSize = 15,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+            Foreground = IslandText(255),
         });
         expanded.Children.Add(new TextBlock
         {
             Text = $"示例插件 · {Manifest.Version} · 私有依赖 {_model.Describe()}",
             FontSize = 12,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(200, 255, 255, 255)),
+            Foreground = IslandText(200),
             TextWrapping = TextWrapping.Wrap,
         });
         expanded.Children.Add(_expandedText);
@@ -109,7 +131,7 @@ public sealed class HelloPlugin : IslandPluginBase
         {
             Text = "禁用后：内容清空、设置页移除、定时器停止、程序集尝试回收（见日志）",
             FontSize = 12,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(160, 255, 255, 255)),
+            Foreground = IslandText(160),
             TextWrapping = TextWrapping.Wrap,
         });
 
@@ -139,7 +161,7 @@ public sealed class HelloPlugin : IslandPluginBase
             Text = $"Id：{Manifest.Id} · 版本 {Manifest.Version} · 目录：{PluginDirectory}",
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(180, 255, 255, 255)),
+            Foreground = PageHint(),
         });
 
         var toggle = new ToggleSwitch
@@ -171,17 +193,20 @@ public sealed class HelloPlugin : IslandPluginBase
             Text = "受管异常会在下一次心跳（最多 10 秒后）由宿主捕获，记入日志并计数；累计 5 次会自动停用插件。",
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(160, 255, 255, 255)),
+            Foreground = PageHint(),
         });
 
         return panel;
     }
 
-    private static TextBlock NewText(string text) => new()
+    /// <summary>设置页的次级文字：设置窗跟随应用主题，取系统画刷（写死白色在浅色窗里看不见）。</summary>
+    private static Brush PageHint() => (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
+
+    private TextBlock NewText(string text) => new()
     {
         Text = text,
         FontSize = 13,
-        Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+        Foreground = IslandText(255),
         VerticalAlignment = VerticalAlignment.Center,
     };
 }

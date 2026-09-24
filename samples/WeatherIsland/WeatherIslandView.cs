@@ -46,8 +46,12 @@ public sealed class WeatherIslandView : UserControl, IMorphView
     /// <summary>当前形态进度：0 = 紧凑态，1 = 展开态。反转动画时从这里接着走。</summary>
     private double _progress;
 
-    public WeatherIslandView()
+    /// <summary>岛体主题：浅色岛体上写死白色就是白字压白底。</summary>
+    private readonly IIslandTheme _theme;
+
+    public WeatherIslandView(IIslandTheme theme)
     {
+        _theme = theme;
         _icon = new Viewbox
         {
             Width = CompactIconSize,
@@ -61,7 +65,7 @@ public sealed class WeatherIslandView : UserControl, IMorphView
             Text = "--°",
             FontSize = CompactTempSize,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+            Foreground = Hint(255),
             VerticalAlignment = VerticalAlignment.Center,
         };
 
@@ -245,7 +249,7 @@ public sealed class WeatherIslandView : UserControl, IMorphView
         for (var i = 0; i < ForecastDays; i++)
         {
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var cell = new ForecastCell();
+            var cell = new ForecastCell(Hint(150), Hint(255));
             _cells[i] = cell;
             Grid.SetColumn(cell.Root, i);
             grid.Children.Add(cell.Root);
@@ -253,8 +257,23 @@ public sealed class WeatherIslandView : UserControl, IMorphView
         return grid;
     }
 
-    private static SolidColorBrush Hint(byte alpha)
-        => new(Windows.UI.Color.FromArgb(alpha, 255, 255, 255));
+    /// <summary>岛体换主题时就地重刷中性色（代码搭的视图颜色烘在画刷里，不重刷会留在旧主题）。</summary>
+    internal void RefreshTheme()
+    {
+        _temperature.Foreground = Hint(255);
+        _condition.Foreground = Hint(180);
+        _place.Foreground = Hint(150);
+
+        foreach (var cell in _cells)
+        {
+            cell?.RefreshTheme(Hint(150), Hint(255));
+        }
+    }
+
+    /// <summary>中性色：岛体深色时是白色系，浅色（Fluent + 浅色系统）时是黑色系。</summary>
+    private SolidColorBrush Hint(byte alpha) => new(_theme.IsLight
+        ? Windows.UI.Color.FromArgb(alpha, 0, 0, 0)
+        : Windows.UI.Color.FromArgb(alpha, 255, 255, 255));
 
     /// <summary>一天一列：标签 / 图标 / 最高最低温。</summary>
     private sealed class ForecastCell
@@ -277,7 +296,6 @@ public sealed class WeatherIslandView : UserControl, IMorphView
         {
             Text = "—",
             FontSize = 11,
-            Foreground = Hint(150),
             HorizontalAlignment = HorizontalAlignment.Center,
         };
 
@@ -286,21 +304,23 @@ public sealed class WeatherIslandView : UserControl, IMorphView
             Text = "--",
             FontSize = 12.5,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
         };
 
         public TextBlock Low { get; } = new()
         {
             Text = "/--",
             FontSize = 12.5,
-            Foreground = Hint(140),
         };
 
-        public ForecastCell()
+        /// <summary>颜色在构造里补：中性色由岛体主题决定，属性初始化器里拿不到它。</summary>
+        public ForecastCell(Brush hint, Brush strong)
         {
+            Label.Foreground = hint;
+            High.Foreground = strong;
+            Low.Foreground = hint;
+
             Root.Children.Add(Label);
             Root.Children.Add(Icon);
-
             var row = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -310,6 +330,14 @@ public sealed class WeatherIslandView : UserControl, IMorphView
             row.Children.Add(High);
             row.Children.Add(Low);
             Root.Children.Add(row);
+        }
+
+        /// <summary>岛体换主题：重刷这一列的三个中性色。</summary>
+        public void RefreshTheme(Brush hint, Brush strong)
+        {
+            Label.Foreground = hint;
+            High.Foreground = strong;
+            Low.Foreground = hint;
         }
     }
 }

@@ -83,6 +83,11 @@ public sealed partial class IslandWindow : Window
     private UIElement? _tempContent;
     private Size _tempSize;
     private string? _tempOwner;
+    /// <summary>
+    /// 最近一条宿主自造的消息（<see cref="ShowMessage"/>）。消息卡的配色是建视图时烘进画刷里的，
+    /// 系统换主题时只能按原始数据重建一次（插件自己给的临时内容不在此列，那是插件的事）。
+    /// </summary>
+    private IslandMessage? _tempMessage;
 
     private readonly DispatcherQueueTimer _tempTimer;
     private readonly DispatcherQueueTimer _hoverGuard;
@@ -121,6 +126,15 @@ public sealed partial class IslandWindow : Window
     private readonly Ellipse _idleDot;
     private IslandStyleKind _style = IslandStyleKind.Apple;
     private IslandMaterialKind _material = IslandMaterialKind.Acrylic;
+    /// <summary>系统明暗主题（Fluent 跟随，Apple 忽略）。变化时配色与内容就地重刷，见 <see cref="OnSystemThemeChanged"/>。</summary>
+    private bool _systemLight = SystemTheme.IsLight;
+    /// <summary>
+    /// 生效的岛体明暗 = 外观风格 + 系统主题（<see cref="IslandStyle.IsLightChrome"/>）。
+    /// 各处的配色判断都用它，不要再单独读系统主题 —— Apple 风格在浅色系统下依旧是深色岛。
+    /// </summary>
+    private bool _light;
+    /// <summary>已经就"材质不可用"告过警的材质：系统不支持时每次主题切换都会重试，日志不该跟着刷屏。</summary>
+    private IslandMaterialKind? _warnedMaterial;
     private bool _styleApplied;
     // 窗口级系统材质（仅 Fluent）：不支持时退回纯色底衬
     private IslandBackdrop? _backdrop;
@@ -213,7 +227,8 @@ public sealed partial class IslandWindow : Window
         {
             Width = 8,
             Height = 8,
-            Fill = new SolidColorBrush(IslandStyle.IdleDotColor(_style)),
+            // 底色只是初值：构造末尾的 ApplyStyle 会按当前风格与主题重写它
+            Fill = new SolidColorBrush(IslandStyle.IdleDotColor(_style, light: false)),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 14, 0),
@@ -260,8 +275,10 @@ public sealed partial class IslandWindow : Window
         _dropExitGrace.Tick += (_, _) => EndDropSession();
 
         _settings.Changed += OnSettingChanged;
+        SystemTheme.Changed += OnSystemThemeChanged;
         Closed += (_, _) =>
         {
+            SystemTheme.Changed -= OnSystemThemeChanged;
             StopPositionSlide();
             _positionSlide = null;
             _watchdog?.Stop();
@@ -312,6 +329,7 @@ public sealed partial class IslandWindow : Window
         _tempContent = content;
         _tempSize = size;
         _tempOwner = owner;
+        _tempMessage = null;
         _tempTimer.Stop();
         _tempTimer.Interval = duration;
         _tempTimer.Start();
@@ -335,6 +353,7 @@ public sealed partial class IslandWindow : Window
         _tempTimer.Stop();
         _tempContent = null;
         _tempOwner = null;
+        _tempMessage = null;
         EnsureCanvas();
         TransitionToLiveState();
         UpdateVisibility();
@@ -342,8 +361,10 @@ public sealed partial class IslandWindow : Window
 
     public void ShowMessage(IslandMessage msg, string? owner = null)
     {
-        var (view, size) = MessageView.Build(msg, _style);
+        var (view, size) = MessageView.Build(msg, _style, _light);
         ShowTemporary(view, size, msg.Duration, owner);
+        // ShowTemporary 会把它清掉（那是对插件内容的语义），宿主消息在这里重新登记
+        _tempMessage = msg;
     }
 
     public void RefreshFromSettings()
@@ -465,29 +486,73 @@ public sealed partial class IslandWindow : Window
     }
 
     /// <summary>
-    /// 应用外观风格：窗口材质、底衬、描边、圆角与空闲点颜色。风格与材质都没变时为 no-op
+    /// 应用外观风格：窗口材质、底衬、描边、圆角与空闲点颜色。风格、材质与系统明暗主题都没变时为 no-op
     /// （其余 island.* 设置改动也会触发刷新，避免每次都重建材质与画刷）。
+    ///
+    /// 顺带把 <c>RequestedTheme</c> 写到根节点上：Fluent 跟随系统主题，插件视图里所有
+    /// <c>{ThemeResource ...}</c>（以及默认前景色）都跟着换成深色/浅色那一套，不必逐个插件去改。
+    /// Apple 永远是深色 —— 黑胶囊上的文字必须是白的。
     /// </summary>
     private void ApplyStyle()
     {
         var style = IslandStyle.ParseStyle(_settings.Get(IslandStyle.StyleKey, IslandStyle.AppleValue));
         var material = IslandStyle.ParseMaterial(_settings.Get(IslandStyle.MaterialKey, IslandStyle.AcrylicValue));
-        if (_styleApplied && style == _style && material == _material) return;
+        _systemLight = SystemTheme.IsLight;
+        bool light = IslandStyle.IsLightChrome(style, _systemLight);
+        if (_styleApplied && style == _style && material == _material && light == _light) return;
 
         _style = style;
         _material = material;
+        _light = light;
         _styleApplied = true;
 
+        RootGrid.RequestedTheme = IsLightChrome ? ElementTheme.Light : ElementTheme.Dark;
+
         ApplyBackdrop();
-        _mainSurface.ApplyStyle(_style, _materialApplied);
+        _mainSurface.ApplyStyle(_style, _materialApplied, _light);
         ApplyCornerRadius(_radiusHeight, _radiusExpanded);
         RefreshQueueStyle();
-        _idleDot.Fill = new SolidColorBrush(IslandStyle.IdleDotColor(_style));
+        _idleDot.Fill = new SolidColorBrush(IslandStyle.IdleDotColor(_style, _light));
+        _log.Debug($"外观已应用：风格 {_style.ToValue()}，材质 {_material.ToValue()}"
+                   + $"{(_materialApplied ? "" : "（不可用，已回退纯色底衬）")}，岛体明暗 {(_light ? "浅色" : "深色")}。");
+    }
+
+    /// <summary>岛体是否按浅色配色渲染（= <see cref="_light"/>）：聚光卡、插件侧也都取这一个值。</summary>
+    internal bool IsLightChrome => _light;
+
+    /// <summary>
+    /// 系统明暗主题变化：就地重刷配色，并把已经画在屏幕上的宿主内容按新主题重建
+    /// （画刷是建视图时烘进去的，改不动）。插件视图不需要重建 —— 根节点的 RequestedTheme 已经翻了，
+    /// 插件自己的 <see cref="WinIsland.Core.IIslandTheme.Changed"/> 会通知到它。
+    /// </summary>
+    private void OnSystemThemeChanged()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(OnSystemThemeChanged);
+            return;
+        }
+
+        if (SystemTheme.IsLight == _systemLight) return;
+
+        bool wasLight = _light;
+        ApplyStyle();
+        // Apple 风格不跟随系统主题：系统换色与岛体无关，屏幕上的内容也别动
+        if (wasLight == _light) return;
+
+        if (_tempMessage is { } msg)
+        {
+            var (view, _) = MessageView.Build(msg, _style, _light);
+            _tempContent = view;
+            SetContentImmediate(view);
+        }
+
+        if (_dropping) RebuildDropPanel();
     }
 
     /// <summary>
-    /// 窗口级材质。Fluent 用控制器直接挂 Desktop Acrylic / Mica —— 岛体与队列卡片都在窗口形状内，
-    /// 材质因此只出现在岛屿轮廓里。Apple 保持原来的透明画布背景（材质让位）。
+    /// 窗口级材质。Fluent 用控制器直接挂 Desktop Acrylic / Mica（并告诉它当前是深色还是浅色主题）——
+    /// 岛体与队列卡片都在窗口形状内，材质因此只出现在岛屿轮廓里。Apple 保持原来的透明画布背景（材质让位）。
     /// </summary>
     private void ApplyBackdrop()
     {
@@ -511,13 +576,18 @@ public sealed partial class IslandWindow : Window
             _backdropOwned = true;
         }
 
-        if (_backdrop.TryApply(_material))
+        if (_backdrop.TryApply(_material, _light))
         {
             _materialApplied = true;
             return;
         }
 
-        _log.Warn($"当前系统不支持 {_material.ToValue()} 材质，已回退为纯色底衬。");
+        if (_warnedMaterial != _material)
+        {
+            _warnedMaterial = _material;
+            _log.Warn($"当前系统不支持 {_material.ToValue()} 材质，已回退为纯色底衬。");
+        }
+
         _backdrop.Clear();
         _materialApplied = false;
         SystemBackdrop = new TransparentBackdrop();
@@ -529,7 +599,7 @@ public sealed partial class IslandWindow : Window
     {
         foreach (var surface in _queueSurfaces)
         {
-            surface.ApplyStyle(_style, _materialApplied);
+            surface.ApplyStyle(_style, _materialApplied, _light);
             surface.SetRadius(IslandStyle.ResolveQueueRadius(_style, surface.Border.Height));
         }
     }
@@ -747,7 +817,7 @@ public sealed partial class IslandWindow : Window
             surface.MorphView = content.MorphView;
             surface.Border.Width = cardWidth;
             surface.Border.Height = cardHeight;
-            surface.ApplyStyle(_style, _materialApplied);
+            surface.ApplyStyle(_style, _materialApplied, _light);
             surface.SetRadius(IslandStyle.ResolveQueueRadius(_style, cardHeight));
             surface.SetContent(inner);
 
@@ -826,11 +896,16 @@ public sealed partial class IslandWindow : Window
         UpdateHitRegion(force: true);
     }
 
-    private static UIElement BuildFallbackLabel(string owner, IslandLiveContent content)
+    /// <summary>没有视图的插件（只声明了尺寸）在队列里显示的兜底标签。</summary>
+    private UIElement BuildFallbackLabel(string owner, IslandLiveContent content)
     {
         var accent = content.OwnerAccent ?? Windows.UI.Color.FromArgb(255, 90, 90, 95);
         var label = content.OwnerLabel ?? owner;
         var glyph = content.OwnerGlyph ?? "\uE946";
+        // 强调色芯片上的图标恒为白（强调色都是饱和色）；标签文字跟着岛体明暗
+        var labelBrush = new SolidColorBrush(_light
+            ? Windows.UI.Color.FromArgb(255, 28, 28, 30)
+            : Windows.UI.Color.FromArgb(255, 255, 255, 255));
 
         var grid = new Grid
         {
@@ -862,7 +937,7 @@ public sealed partial class IslandWindow : Window
             Text = label,
             FontSize = 14,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+            Foreground = labelBrush,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxLines = 1,
@@ -2083,6 +2158,23 @@ public sealed partial class IslandWindow : Window
         _dropOffset = Math.Min(_dropOffset, _dropView?.ScrollableWidth ?? 0);
     }
 
+    /// <summary>
+    /// 系统换主题时把投放面板整块换新：面板底色、文字与边缘渐隐都是建视图时烘进画刷的，改不动只能重建。
+    /// 会话状态（载荷、滚动位置）由岛窗口持有，重建后原样回填；尺寸不变，所以不碰窗口几何，
+    /// 也不打断正在进行的拖放。
+    /// </summary>
+    private void RebuildDropPanel()
+    {
+        var view = new DropStripView(_style, _materialApplied, _light);
+        view.SetTargets(_dropTargets);
+        view.SetPayload(_dropPayload);
+
+        _dropView = view;
+        _dropArmedIndex = -1;      // 换了一批卡片，高亮由下一次 DragOver 重新裁决
+        SetContentImmediate(view.Root);
+        view.ScrollTo(_dropOffset);
+    }
+
     private void IslandRoot_DragEnter(object sender, DragEventArgs e)
     {
         if (DescribeDrag(e.DataView) is IslandDropKind.None)
@@ -2202,7 +2294,7 @@ public sealed partial class IslandWindow : Window
         _expanded = false;
         ClearTouchExpand();
 
-        _dropView = new DropStripView(_style, _materialApplied);
+        _dropView = new DropStripView(_style, _materialApplied, _light);
         _dropView.SetTargets(_dropTargets);
         SetContentImmediate(_dropView.Root);     // 面板自带进场动画，不再套一层内容交接
 
@@ -2510,10 +2602,10 @@ public sealed partial class IslandWindow : Window
         /// <summary>卡片内容的形态视图（可能为 null，例如只有双视图的插件）。</summary>
         public IMorphView? MorphView { get; set; }
 
-        public void ApplyStyle(IslandStyleKind style, bool materialApplied)
+        public void ApplyStyle(IslandStyleKind style, bool materialApplied, bool light)
         {
-            var stroke = IslandStyle.CreateStroke(style);
-            Border.Background = IslandStyle.CreateSurfaceFill(style, materialApplied);
+            var stroke = IslandStyle.CreateStroke(style, light);
+            Border.Background = IslandStyle.CreateSurfaceFill(style, materialApplied, light);
             Border.BorderBrush = stroke;
             Border.BorderThickness = stroke == null ? new Thickness(0) : new Thickness(1);
         }

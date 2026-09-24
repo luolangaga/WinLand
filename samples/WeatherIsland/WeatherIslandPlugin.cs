@@ -36,8 +36,11 @@ public sealed class WeatherIslandPlugin : IslandPluginBase
         Context.Register(new ActionDisposable(() => _stopped = true));
 
         _city = ReadCity();
-        _view = new WeatherIslandView();
+        _view = new WeatherIslandView(Theme);
         _view.Apply(_snapshot with { Place = _city });
+        // 岛体换主题（Fluent 跟随系统明暗）：代码搭的视图颜色烘在画刷里，就地重刷一遍
+        Context.Theme.Changed += OnThemeChanged;
+        Context.Register(new ActionDisposable(() => Context.Theme.Changed -= OnThemeChanged));
 
         _content = new IslandLiveContent
         {
@@ -167,6 +170,13 @@ public sealed class WeatherIslandPlugin : IslandPluginBase
 
     /// <summary>是否在灵动岛上展示。关掉后插件继续在后台刷新，随时可以再打开。</summary>
     private void ApplyEnabled() => SetContent(Settings.Get("enabled", true) ? _content : null);
+
+    /// <summary>岛体换主题：视图里的中性色就地重刷（代码搭的视图颜色烘在画刷里）。</summary>
+    private void OnThemeChanged()
+    {
+        Log.Info($"岛体主题已切换为{(Theme.IsLight ? "浅色" : "深色")}，重刷岛视图配色。");
+        _view?.RefreshTheme();
+    }
 
     private void ApplyCity()
     {

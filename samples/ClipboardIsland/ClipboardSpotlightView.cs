@@ -15,13 +15,13 @@ namespace ClipboardIsland;
 /// </summary>
 public sealed class ClipboardSpotlightView : UserControl
 {
-    private static readonly SolidColorBrush TextBrush = new(Microsoft.UI.Colors.White);
-    private static readonly SolidColorBrush HintBrush = new(Windows.UI.Color.FromArgb(150, 255, 255, 255));
-
     private readonly PluginManifest _manifest;
     private readonly Action<ClipItem>? _onPick;
     private readonly Action? _onClear;
+    private readonly IIslandTheme _theme;
 
+    private readonly SolidColorBrush _textBrush;
+    private readonly SolidColorBrush _hintBrush;
     private readonly TextBlock _count;
     private readonly Button _clearButton;
     private readonly StackPanel _rows;
@@ -30,25 +30,35 @@ public sealed class ClipboardSpotlightView : UserControl
 
     private bool _confirmClear;
 
-    public ClipboardSpotlightView(PluginManifest manifest, Action<ClipItem>? onPick, Action? onClear)
+    /// <summary>中性色：岛体深色时是白色系，浅色（Fluent + 浅色系统）时是黑色系。</summary>
+    private Windows.UI.Color Neutral(byte alpha) => _theme.IsLight
+        ? Windows.UI.Color.FromArgb(alpha, 0, 0, 0)
+        : Windows.UI.Color.FromArgb(alpha, 255, 255, 255);
+
+    public ClipboardSpotlightView(PluginManifest manifest, Action<ClipItem>? onPick, Action? onClear, IIslandTheme theme)
     {
         _manifest = manifest;
         _onPick = onPick;
         _onClear = onClear;
+        _theme = theme;
+
+        // 聚光卡也跟着岛体主题明暗：浅色卡片上写死白色就是白字压白底
+        _textBrush = new SolidColorBrush(Neutral(255));
+        _hintBrush = new SolidColorBrush(Neutral(150));
 
         var title = new TextBlock
         {
             Text = manifest.Name,
             FontSize = 24,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = TextBrush,
+            Foreground = _textBrush,
             VerticalAlignment = VerticalAlignment.Center,
         };
 
         _count = new TextBlock
         {
             FontSize = 13,
-            Foreground = HintBrush,
+            Foreground = _hintBrush,
             VerticalAlignment = VerticalAlignment.Center,
         };
 
@@ -70,7 +80,7 @@ public sealed class ClipboardSpotlightView : UserControl
             Text = "点任意一条直接粘进你正在输入的窗口 · 按 Esc 或点卡片外区域收起",
             FontSize = 12.5,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = HintBrush,
+            Foreground = _hintBrush,
         };
 
         _rows = new StackPanel { Spacing = 2 };
@@ -80,7 +90,7 @@ public sealed class ClipboardSpotlightView : UserControl
             Text = "还没有记录。复制一段文字或一张图片，这里就会记下来。",
             FontSize = 13,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = HintBrush,
+            Foreground = _hintBrush,
             Margin = new Thickness(2, 12, 2, 0),
             Visibility = Visibility.Collapsed,
         };
@@ -123,7 +133,7 @@ public sealed class ClipboardSpotlightView : UserControl
         _rows.Children.Clear();
         foreach (var item in items)
         {
-            _rows.Children.Add(new ClipRow(item, interactive: true, invoke: _onPick));
+            _rows.Children.Add(new ClipRow(item, _theme, interactive: true, invoke: _onPick));
         }
 
         var hasItems = items.Count > 0;

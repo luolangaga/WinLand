@@ -10,13 +10,15 @@ internal sealed class PluginContext : IPluginContext
     private readonly string _directory;
     private readonly ScopedSettings _settings;
     private readonly ScopedIslandSurface _island;
+    private readonly PluginTheme _theme;
 
-    public PluginContext(PluginInstance owner, PluginScope scope, PluginManifest manifest, string directory)
+    public PluginContext(PluginInstance owner, PluginScope scope, PluginManifest manifest, string directory, PluginTheme theme)
     {
         _owner = owner;
         _scope = scope;
         _manifest = manifest;
         _directory = directory;
+        _theme = theme;
         _settings = new ScopedSettings(owner.Settings, manifest.Id, scope, owner.RunOnUI);
         _island = new ScopedIslandSurface(owner, owner.Island, scope);
     }
@@ -34,6 +36,8 @@ internal sealed class PluginContext : IPluginContext
     public ISettingsStore Settings => _settings;
 
     public IIslandSurface Island => _island;
+
+    public IIslandTheme Theme => _theme;
 
     public IDisposable Register(IDisposable disposable) => _scope.Register(disposable);
 

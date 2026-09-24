@@ -7,7 +7,7 @@
   "icon_glyph": "\uE950",
   "entry_dll": "HardwareMonitor.dll",
   "api_version": 2,
-  "min_host_version": "2.0.0",
+  "min_host_version": "2.3.0",
   "license": "MIT",
   "tags": ["hardware", "monitor", "fps", "network"]
 }

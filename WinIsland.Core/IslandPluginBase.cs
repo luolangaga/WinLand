@@ -13,6 +13,10 @@ public abstract class IslandPluginBase : IIslandPlugin
     protected string PluginDirectory => Context.PluginDirectory;
     protected Version HostVersion => Context.HostVersion;
 
+    /// <summary>岛体当前的明暗主题。XAML 视图里 <c>{ThemeResource ...}</c> 会自动跟着走，
+    /// 代码里搭视图时才需要读它（写死的白色在浅色岛上就是白字压白底）。</summary>
+    protected IIslandTheme Theme => Context.Theme;
+
     public async Task InitializeAsync(IPluginContext context)
     {
         _context = context;

@@ -4,7 +4,7 @@
   "version": "1.2.1",
   "entry_dll": "ClipboardIsland.dll",
   "api_version": 2,
-  "min_host_version": "2.1.0",
+  "min_host_version": "2.3.0",
   "description": "复制文字或图片时岛上弹提示；展开就是最近几条历史，点任意一条直接粘进你正在输入的窗口",
   "author": "luolangaga",
   "icon_glyph": "\uE77F",

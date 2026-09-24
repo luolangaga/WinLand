@@ -7,6 +7,32 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <!-- 岛体在浅色主题（Fluent）下是浅底，插件自己的中性色必须成对给出：
+                 只写死一套白色，浅色岛上就是白环压白底（文字直接用系统画刷） -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="BatteryNeutralStrokeBrush" Color="#33000000" />
+                    <SolidColorBrush x:Key="BatteryTrackBrush" Color="#1A000000" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="BatteryNeutralStrokeBrush" Color="#33FFFFFF" />
+                    <SolidColorBrush x:Key="BatteryTrackBrush" Color="#1AFFFFFF" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+            <!-- 百分比的两个档位：展开态更亮一档，代码里按形态切换 Style。
+                 颜色必须留在 Style 里走 ThemeResource —— 代码里直接赋 Foreground 会打断主题引用，
+                 浅色主题下就变成白字压白底。 -->
+            <Style x:Key="PercentCompactStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Style>
+            <Style x:Key="PercentExpandedStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+            </Style>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
     <Grid x:Name="RootGrid" Padding="8,0,14,0">
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
@@ -55,7 +81,7 @@
                 VerticalAlignment="Center">
                 <Ellipse
                     x:Name="BgRing"
-                    Stroke="#33FFFFFF"
+                    Stroke="{ThemeResource BatteryNeutralStrokeBrush}"
                     StrokeThickness="3" />
                 <Ellipse
                     x:Name="FgRing"
@@ -71,7 +97,7 @@
                 <FontIcon
                     x:Name="CenterIcon"
                     FontSize="10"
-                    Foreground="White"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Glyph="&#xE859;"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center" />
@@ -85,12 +111,12 @@
                 <TextBlock
                     x:Name="PercentText"
                     FontSize="12"
-                    Foreground="#D9FFFFFF"
+                    Style="{StaticResource PercentCompactStyle}"
                     Text="{x:Bind ViewModel.PercentText, Mode=OneWay}" />
                 <TextBlock
                     x:Name="PowerText"
                     FontSize="11"
-                    Foreground="#99FFFFFF"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Text="{x:Bind ViewModel.ChargePowerText, Mode=OneWay}" />
             </StackPanel>
 
@@ -119,7 +145,7 @@
             Opacity="0"
             Spacing="8"
             Padding="0,8,0,0">
-            <Grid x:Name="ProgressTrack" Height="6" CornerRadius="3" Background="#1AFFFFFF">
+            <Grid x:Name="ProgressTrack" Height="6" CornerRadius="3" Background="{ThemeResource BatteryTrackBrush}">
                 <Rectangle
                     x:Name="ProgressBar"
                     HorizontalAlignment="Left"
@@ -134,21 +160,21 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Spacing="2">
-                    <TextBlock FontSize="11" Foreground="#80FFFFFF" Text="充电功率" />
+                    <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="充电功率" />
                     <TextBlock
                         x:Name="DetailPower"
                         FontSize="14"
                         FontWeight="SemiBold"
-                        Foreground="White"
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                         Text="{x:Bind ViewModel.ChargePowerText, Mode=OneWay}" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Spacing="2">
-                    <TextBlock FontSize="11" Foreground="#80FFFFFF" Text="电池状态" />
+                    <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="电池状态" />
                     <TextBlock
                         x:Name="DetailStatus"
                         FontSize="14"
                         FontWeight="SemiBold"
-                        Foreground="White"
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                         Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" />
                 </StackPanel>
             </Grid>

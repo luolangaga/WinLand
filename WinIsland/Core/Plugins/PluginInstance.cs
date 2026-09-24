@@ -22,6 +22,7 @@ public sealed class PluginInstance
     private PluginAssemblyContext? _assemblyContext;
     private Assembly? _assembly;
     private PluginScope? _scope;
+    private PluginTheme? _theme;
     private int _errorCount;
     private int _ignoredCallLogs;
 
@@ -138,6 +139,9 @@ public sealed class PluginInstance
         }
     }
 
+    /// <summary>岛体生效主题可能变了（UI 线程，由 <see cref="PluginHost"/> 广播）：让这个插件的主题对象自己核算。</summary>
+    internal void ApplyTheme() => _theme?.Apply();
+
     internal void Reset(PluginManifest manifest)
     {
         Info.ApplyManifest(manifest);
@@ -222,7 +226,10 @@ public sealed class PluginInstance
         var scope = new PluginScope(Info.Id, ex => Log.Error("插件注册项释放失败", ex));
         _scope = scope;
         var directory = Info.IsBuiltIn ? AppContext.BaseDirectory : Info.Source;
-        var context = new PluginContext(this, scope, Info.Manifest, directory);
+        // 主题是每个插件一份的（要按插件守卫与编组），随作用域生灭
+        var theme = new PluginTheme(this, scope);
+        _theme = theme;
+        var context = new PluginContext(this, scope, Info.Manifest, directory, theme);
         Info.State = PluginState.Loaded;
         Log.Info("正在初始化…");
 
@@ -424,6 +431,7 @@ public sealed class PluginInstance
     {
         var scope = _scope;
         _scope = null;
+        _theme = null;
         if (scope == null)
         {
             return;

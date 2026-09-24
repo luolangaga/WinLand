@@ -12,17 +12,22 @@ public sealed class HardwareMonitorView : UserControl, IMorphView
 {
     private const double ExpandedHeight = 104;
 
-    private readonly TextBlock _compactText = NewValueText(13);
+    // 中性色共享两支画刷（岛体换主题时只改它们的 Color，所有文字当场跟着变）
+    private readonly SolidColorBrush _valueBrush = new();
+    private readonly SolidColorBrush _hintBrush = new();
+
+    private readonly TextBlock _compactText;
     private readonly StackPanel _expandedPanel;
-    private readonly TextBlock _fpsValue = NewValueText(20);
-    private readonly TextBlock _fpsProcess = NewHintText();
-    private readonly TextBlock _cpuValue = NewValueText(13);
-    private readonly TextBlock _cpuName = NewHintText();
-    private readonly TextBlock _gpuValue = NewValueText(13);
-    private readonly TextBlock _gpuName = NewHintText();
-    private readonly TextBlock _netValue = NewValueText(13);
-    private readonly TextBlock _netName = NewHintText();
+    private readonly TextBlock _fpsValue;
+    private readonly TextBlock _fpsProcess;
+    private readonly TextBlock _cpuValue;
+    private readonly TextBlock _cpuName;
+    private readonly TextBlock _gpuValue;
+    private readonly TextBlock _gpuName;
+    private readonly TextBlock _netValue;
+    private readonly TextBlock _netName;
     private readonly DispatcherQueueTimer _morphTimer;
+    private readonly IIslandTheme _theme;
 
     private DateTimeOffset _morphStart;
     private TimeSpan _morphDuration = TimeSpan.FromMilliseconds(333);
@@ -30,8 +35,23 @@ public sealed class HardwareMonitorView : UserControl, IMorphView
     private double _morphTarget;
     private double _progress;
 
-    public HardwareMonitorView()
+    public HardwareMonitorView(IIslandTheme theme)
     {
+        _theme = theme;
+        ApplyThemeColors();
+        // 岛体换主题：共享画刷换个颜色，所有文字当场跟着变
+        _theme.Changed += ApplyThemeColors;
+
+        // 颜色要等主题上完再建（字段初始化器里拿不到 _theme）
+        _compactText = NewValueText(13, _valueBrush);
+        _fpsValue = NewValueText(20, _valueBrush);
+        _fpsProcess = NewHintText(_hintBrush);
+        _cpuValue = NewValueText(13, _valueBrush);
+        _cpuName = NewHintText(_hintBrush);
+        _gpuValue = NewValueText(13, _valueBrush);
+        _gpuName = NewHintText(_hintBrush);
+        _netValue = NewValueText(13, _valueBrush);
+        _netName = NewHintText(_hintBrush);
         var icon = new FontIcon
         {
             Glyph = "\uE950",
@@ -149,7 +169,7 @@ public sealed class HardwareMonitorView : UserControl, IMorphView
         {
             Text = "帧率",
             FontSize = 12,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(150, 255, 255, 255)),
+            Foreground = _hintBrush,
             VerticalAlignment = VerticalAlignment.Center,
         };
 
@@ -165,7 +185,7 @@ public sealed class HardwareMonitorView : UserControl, IMorphView
         return row;
     }
 
-    private static UIElement BuildMetricRow(string label, TextBlock value, TextBlock name)
+    private UIElement BuildMetricRow(string label, TextBlock value, TextBlock name)
     {
         var row = new Grid { ColumnSpacing = 10 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
@@ -176,7 +196,7 @@ public sealed class HardwareMonitorView : UserControl, IMorphView
         {
             Text = label,
             FontSize = 12,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(150, 255, 255, 255)),
+            Foreground = _hintBrush,
             VerticalAlignment = VerticalAlignment.Center,
         });
 
@@ -190,19 +210,30 @@ public sealed class HardwareMonitorView : UserControl, IMorphView
         return row;
     }
 
-    private static TextBlock NewValueText(double size) => new()
+    /// <summary>中性色：岛体深色时是白色系，浅色（Fluent + 浅色系统）时是黑色系。</summary>
+    private void ApplyThemeColors()
+    {
+        _valueBrush.Color = Neutral(255);
+        _hintBrush.Color = Neutral(150);
+    }
+
+    private Windows.UI.Color Neutral(byte alpha) => _theme.IsLight
+        ? Windows.UI.Color.FromArgb(alpha, 0, 0, 0)
+        : Windows.UI.Color.FromArgb(alpha, 255, 255, 255);
+
+    private static TextBlock NewValueText(double size, Brush foreground) => new()
     {
         FontSize = size,
         FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-        Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+        Foreground = foreground,
         VerticalAlignment = VerticalAlignment.Center,
         Text = "--",
     };
 
-    private static TextBlock NewHintText() => new()
+    private static TextBlock NewHintText(Brush foreground) => new()
     {
         FontSize = 11,
-        Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(140, 255, 255, 255)),
+        Foreground = foreground,
         TextTrimming = TextTrimming.CharacterEllipsis,
         MaxLines = 1,
     };

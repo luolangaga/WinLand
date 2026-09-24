@@ -24,12 +24,12 @@
                 x:Name="TitleText"
                 FontSize="14"
                 FontWeight="SemiBold"
-                Foreground="White"
+                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                 Text="XAML 插件" />
             <TextBlock
                 x:Name="SubText"
                 FontSize="12"
-                Foreground="#B0FFFFFF"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 Opacity="0"
                 Text="来自插件程序集的 XAML 视图" />
         </StackPanel>

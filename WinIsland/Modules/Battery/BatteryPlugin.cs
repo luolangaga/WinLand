@@ -92,7 +92,7 @@ public sealed class BatteryPlugin : IslandPluginBase
     /// <summary>点击岛体 = 展开超级大卡片（大进度环 + 容量/健康/循环等高级信息）。</summary>
     private void OpenSpotlight()
     {
-        _spotlightView ??= new BatterySpotlightView(_vm);
+        _spotlightView ??= new BatterySpotlightView(_vm, Theme);
         _spotlightOpen = true;
         Context.Island.OpenSpotlight(new IslandSpotlight
         {

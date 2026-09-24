@@ -50,6 +50,12 @@ public sealed partial class SpotlightWindow : Window
     private bool _hotKeyInstalled;
     private PendingShow? _pendingShow;
 
+    // 外观（与岛体同一套规则）：圆角、底衬、描边、明暗主题全都来自 IslandStyle，
+    // 主题变化时就地重刷（见 OnSystemThemeChanged），所以卡片在屏幕上开着也会跟着换色
+    private IslandStyleKind _style = IslandStyleKind.Apple;
+    private bool _materialApplied;
+    private bool _light = SystemTheme.IsLight;
+
     // 目标显示器与主岛起点（物理像素）
     private RectInt32 _outerBounds;
     private RectInt32 _workArea;
@@ -97,14 +103,45 @@ public sealed partial class SpotlightWindow : Window
             root.Changed += (_, _) => OnDpiChanged();
         };
 
+        SystemTheme.Changed += OnSystemThemeChanged;
         Closed += (_, _) =>
         {
+            SystemTheme.Changed -= OnSystemThemeChanged;
             if (_hotKeyInstalled)
             {
                 Win32.UninstallEscapeHotKey(_hwnd);
                 _hotKeyInstalled = false;
             }
         };
+    }
+
+    /// <summary>
+    /// 聚光卡的外观：底衬、描边、圆角、明暗主题 —— 和岛体同一套 <see cref="IslandStyle"/> 规则。
+    /// <c>RequestedTheme</c> 也在这里落到根节点上，插件的大卡片内容（<c>{ThemeResource ...}</c>）
+    /// 因此跟着岛体一起明暗切换。
+    /// </summary>
+    private void ApplyChrome()
+    {
+        RootCanvas.RequestedTheme = IslandStyle.IsLightChrome(_style, _light) ? ElementTheme.Light : ElementTheme.Dark;
+        Card.Background = IslandStyle.CreateSpotlightFill(_style, _materialApplied, _light);
+        Card.BorderBrush = IslandStyle.CreateSpotlightStroke(_style, _light);
+        Card.CornerRadius = new CornerRadius(IslandStyle.ResolveSpotlightRadius(_style));
+    }
+
+    /// <summary>系统换主题：卡片开着就当场换色（没开着的话下次展示自然会取到新主题）。</summary>
+    private void OnSystemThemeChanged()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(OnSystemThemeChanged);
+            return;
+        }
+
+        if (SystemTheme.IsLight == _light) return;
+
+        _light = SystemTheme.IsLight;
+        if (!_shown) return;
+        ApplyChrome();
     }
 
     /// <summary>
@@ -129,9 +166,10 @@ public sealed partial class SpotlightWindow : Window
         _outerBounds = outer;
         _workArea = display.WorkArea;
 
-        Card.Background = IslandStyle.CreateSpotlightFill(style, materialApplied);
-        Card.BorderBrush = IslandStyle.CreateSpotlightStroke(style);
-        Card.CornerRadius = new CornerRadius(IslandStyle.ResolveSpotlightRadius(style));
+        _style = style;
+        _materialApplied = materialApplied;
+        _light = SystemTheme.IsLight;
+        ApplyChrome();
         SpotlightHost.Content = content.Content;
 
         _presenter.IsAlwaysOnTop = false;
