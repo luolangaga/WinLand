@@ -9,15 +9,13 @@ namespace WinIsland.Modules.Battery;
 
 /// <summary>
 /// 电池的「超级展开」聚光卡：左侧大进度环，右侧高级信息（充放电功率、容量、健康度、
-/// 循环次数、电压、预计时间）。数值每 40ms 平滑推进、每秒重新采样一次；
+/// 循环次数、电压、预计时间）。数据每秒重新采样一次，进度环用原生 ProgressRing（确定模式），
+/// 数值过渡与弧长都由控件自己负责；
 /// 生命周期跟着 Loaded/Unloaded 走（宿主收起卡片时内容被卸下 → 停表）。
 /// </summary>
 public sealed partial class BatterySpotlightView : UserControl
 {
-    private const int TickMs = 40;
-    /// <summary>每 25 个 tick（约 1 秒）重新采一次数据。</summary>
-    private const int SampleEveryTicks = 25;
-    private const double RingEase = 0.16;
+    private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(1);
 
     private static readonly Windows.UI.Color ChargingColor = Windows.UI.Color.FromArgb(0xFF, 0x6C, 0xCB, 0x5F);
     private static readonly Windows.UI.Color WarningColor = Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xA6, 0x23);
@@ -25,9 +23,6 @@ public sealed partial class BatterySpotlightView : UserControl
 
     private DispatcherQueueTimer? _tick;
     private BatteryPowerInfo _info;
-    private double _ringValue = 100;
-    private double _ringTarget = 100;
-    private int _ticks;
     private int _sampledPercent = -1;
     private readonly IIslandTheme _theme;
 
@@ -60,13 +55,12 @@ public sealed partial class BatterySpotlightView : UserControl
         if (_tick == null)
         {
             _tick = DispatcherQueue.CreateTimer();
-            _tick.Interval = TimeSpan.FromMilliseconds(TickMs);
+            _tick.Interval = SampleInterval;
             _tick.IsRepeating = true;
             _tick.Tick += (_, _) => OnTick();
         }
 
-        _sampledPercent = -1;
-        _ticks = SampleEveryTicks;      // 第一拍立刻采样
+        _sampledPercent = -1;      // 第一拍立刻采样
         _tick.Start();
     }
 
@@ -74,30 +68,8 @@ public sealed partial class BatterySpotlightView : UserControl
 
     private void OnTick()
     {
-        if (++_ticks >= SampleEveryTicks)
-        {
-            _ticks = 0;
-            _info = BatteryProbe.Read();
-            UpdateValues();
-        }
-
-        UpdateRing();
-    }
-
-    private void UpdateRing()
-    {
-        _ringTarget = 100 - Math.Clamp(ViewModel.Percent, 0, 100);
-        double delta = _ringTarget - _ringValue;
-        if (Math.Abs(delta) < 0.02)
-        {
-            _ringValue = _ringTarget;
-        }
-        else
-        {
-            _ringValue += delta * RingEase;
-        }
-
-        FgRing.StrokeDashOffset = _ringValue;
+        _info = BatteryProbe.Read();
+        UpdateValues();
     }
 
     private void UpdateValues()
@@ -108,7 +80,8 @@ public sealed partial class BatterySpotlightView : UserControl
         if (percent != _sampledPercent)
         {
             _sampledPercent = percent;
-            FgRing.Stroke = ViewModel.BatteryColor;
+            FgRing.Foreground = ViewModel.BatteryColor;
+            FgRing.Value = percent;
         }
 
         // 状态胶囊：充电中 / 已接通电源 / 放电中

@@ -34,6 +34,7 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
         InitializeComponent();
 
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        BatteryRing.SizeChanged += (_, _) => SyncRingSize();
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -51,6 +52,7 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
 
         BuildArcs();
 
+        SyncRingSize();
         UpdateProgressArc();
         UpdateProgressBar();
         UpdateArcColor();
@@ -185,9 +187,22 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
     private void UpdateProgressArc()
     {
         if (FgRing == null) return;
-        double circumference = 100;
-        double offset = circumference - (ViewModel.Percent / 100.0 * circumference);
-        FgRing.StrokeDashOffset = offset;
+        FgRing.Value = Math.Clamp(ViewModel.Percent, 0, 100);
+    }
+
+    /// <summary>
+    /// 原生 ProgressRing 不跟随容器拉伸（默认固定 32×32），而岛体这颗环的外框会在
+    /// 26↔48 之间做尺寸 morph —— 展开/收起动画期间 SizeChanged 是逐帧触发的，这里跟着同步。
+    /// </summary>
+    private void SyncRingSize()
+    {
+        if (FgRing == null || BatteryRing == null) return;
+        double size = BatteryRing.ActualWidth;
+        if (size > 0)
+        {
+            FgRing.Width = size;
+            FgRing.Height = size;
+        }
     }
 
     private void UpdateProgressBar()
@@ -201,7 +216,7 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
     {
         if (FgRing == null || ProgressBar == null) return;
         var c = ViewModel.BatteryColor;
-        FgRing.Stroke = c;
+        FgRing.Foreground = c;
         ProgressBar.Fill = c;
     }
 
@@ -232,12 +247,15 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
     {
         var sb = new Storyboard();
 
-        double circumference = 100;
-        double targetOffset = circumference - (ViewModel.Percent / 100.0 * circumference);
-
+        // 进场扫动：原生环的 Value 本身就是可动画的 DP。基准值先写好（= 最终值），动画结束
+        // 交还给基准值时不会跳；FillBehavior 必须是 Stop —— 否则动画会一直"按住"这个属性，
+        // 之后的电量更新全都写不进去。
+        FgRing.Value = ViewModel.Percent;
         var arcEasing = new CubicEase { EasingMode = EasingMode.EaseOut };
-        sb.Children.Add(Anim(FgRing, "StrokeDashOffset", circumference, targetOffset,
-            TimeSpan.FromMilliseconds(600), arcEasing));
+        var arcAnim = Anim(FgRing, "Value", 0, ViewModel.Percent,
+            TimeSpan.FromMilliseconds(600), arcEasing);
+        arcAnim.FillBehavior = FillBehavior.Stop;
+        sb.Children.Add(arcAnim);
 
         sb.Children.Add(Anim(MainGrid, "Opacity", 0, 1,
             TimeSpan.FromMilliseconds(300),

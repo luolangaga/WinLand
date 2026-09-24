@@ -52,30 +52,17 @@
                         </RadialGradientBrush>
                     </Ellipse.Fill>
                 </Ellipse>
-                <Ellipse
-                    Width="202"
-                    Height="202"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Stroke="{ThemeResource SpotlightRingTrackBrush}"
-                    StrokeThickness="15" />
-                <Ellipse
+                <!-- 进度环用原生 ProgressRing（确定模式）：Value 就是百分比，
+                     自带轨道与圆头弧、数值变化时自带过渡动画，不用手写 dash -->
+                <ProgressRing
                     x:Name="FgRing"
                     Width="202"
                     Height="202"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    RenderTransformOrigin="0.5,0.5"
-                    Stroke="#FF6CCB5F"
-                    StrokeDashArray="100,100"
-                    StrokeDashOffset="100"
-                    StrokeEndLineCap="Round"
-                    StrokeStartLineCap="Round"
-                    StrokeThickness="15">
-                    <Ellipse.RenderTransform>
-                        <RotateTransform Angle="-90" />
-                    </Ellipse.RenderTransform>
-                </Ellipse>
+                    IsIndeterminate="False"
+                    Foreground="#FF6CCB5F"
+                    Background="{ThemeResource SpotlightRingTrackBrush}" />
                 <StackPanel
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center">

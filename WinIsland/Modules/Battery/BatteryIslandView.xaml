@@ -72,28 +72,21 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <!-- Battery ring -->
+            <!-- Battery ring：进度环用原生 ProgressRing（确定模式），Value 就是百分比。
+                 原生环不跟随容器拉伸（固定 32×32），尺寸由代码按外框 26→48 的动画逐帧同步。 -->
             <Grid
                 x:Name="BatteryRing"
                 Width="26"
                 Height="26"
                 HorizontalAlignment="Left"
                 VerticalAlignment="Center">
-                <Ellipse
-                    x:Name="BgRing"
-                    Stroke="{ThemeResource BatteryNeutralStrokeBrush}"
-                    StrokeThickness="3" />
-                <Ellipse
+                <ProgressRing
                     x:Name="FgRing"
-                    Stroke="#FF6CCB5F"
-                    StrokeThickness="3"
-                    StrokeDashArray="100,100"
-                    StrokeDashOffset="100"
-                    RenderTransformOrigin="0.5,0.5">
-                    <Ellipse.RenderTransform>
-                        <RotateTransform Angle="-90" />
-                    </Ellipse.RenderTransform>
-                </Ellipse>
+                    Width="26"
+                    Height="26"
+                    IsIndeterminate="False"
+                    Foreground="#FF6CCB5F"
+                    Background="{ThemeResource BatteryNeutralStrokeBrush}" />
                 <FontIcon
                     x:Name="CenterIcon"
                     FontSize="10"
