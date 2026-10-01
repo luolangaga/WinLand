@@ -125,10 +125,13 @@ WinIsland/                    — Main application
 
 ## Animation Constants
 
-- Expand: 333ms, Collapse: 250ms
-- Easing: `BackEase { EasingMode = EaseOut, Amplitude = 0.45 }`
-- Temporary content (message / `Island.Show`): 280ms via `SizeEasing` — `CubicEase` when shrinking (never past the target), `BackEase { Amplitude = 0.22 }` when growing
-- Content exchange (`SwapContent`): outgoing 130ms, incoming starts at 80ms and runs 200ms (`CubicEase`); total 280ms
+- Expand: 420ms, Collapse: 340ms
+- Easing: growing = `BackEase { EasingMode = EaseOut, Amplitude = 0.3 }` (0.2 for temporary content); shrinking = `QuinticEase { EaseOut }` (never overshoots the target). `island.bounce = false` makes growing use `QuinticEase` too. Built-in morph views (Media / Battery) use the same pair so element-level morphs stay in step with the island size.
+- Temporary content (message / `Island.Show`): 340ms via `SizeEasing`
+- Appear / disappear (`UpdateVisibility`): whole-island opacity fade, in 260ms / out 180ms (window hidden only after the fade-out finishes; the `_fadeVersion` token voids a pending hide if the island is re-shown). The spotlight occlusion path passes `fade: false` because it runs its own fade.
+- Content exchange (`SwapContent`): outgoing 150ms, incoming starts at 100ms and runs 240ms (`QuinticEase`); total 340ms
+- Position slide: 360ms, ease-out quartic
+- Spotlight card: fly-in 520ms, fly-out 380ms
 - Idle size: 128×34, default compact: 230×40, default expanded: 420×150
 - Message card (`MessageView`): width 152..340 (hugs its content), height 40..72; chip 28, title 13 SemiBold, body 11.5 at 60% white
 

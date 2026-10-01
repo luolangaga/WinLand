@@ -286,7 +286,7 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
         SyncGlow();
 
         var sb = new Storyboard();
-        var easing = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.45 };
+        var easing = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.3 };
         var midTime = TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.5);
 
         sb.Children.Add(DiscreteKeyFrameAnim(RootGrid, "Padding",
@@ -342,7 +342,7 @@ public sealed partial class BatteryIslandView : UserControl, IMorphView
         _glowTimer?.Stop();
 
         var sb = new Storyboard();
-        var easing = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.45 };
+        var easing = new QuinticEase { EasingMode = EasingMode.EaseOut };
         var midTime = TimeSpan.FromMilliseconds(duration.TotalMilliseconds * 0.5);
 
         sb.Children.Add(DiscreteKeyFrameAnim(RootGrid, "Padding",

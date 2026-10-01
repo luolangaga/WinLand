@@ -23,8 +23,8 @@ public sealed partial class SpotlightWindow : Window
     private const int ScrimFadeInMs = 220;
     private const int ScrimFadeOutMs = 240;
     private const int CardFadeInMs = 170;
-    private const int FlyInMs = 460;
-    private const int FlyOutMs = 320;
+    private const int FlyInMs = 520;
+    private const int FlyOutMs = 380;
     private const int HintDelayMs = 200;
     private const int HintFadeMs = 220;
     /// <summary>飞入倾角：绕 (0.18, 1, 0) 轴，带 Y 轴分量所以是真的 3D 倾斜而不是纯平面旋转。</summary>
@@ -206,7 +206,7 @@ public sealed partial class SpotlightWindow : Window
 
         var visual = ElementCompositionPreview.GetElementVisual(Card);
         var compositor = visual.Compositor;
-        var ease = compositor.CreateCubicBezierEasingFunction(new Vector2(0.4f, 0f), new Vector2(0.55f, 1f));
+        var ease = compositor.CreateCubicBezierEasingFunction(new Vector2(0.45f, 0f), new Vector2(0.2f, 1f));
 
         var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
 
@@ -332,7 +332,7 @@ public sealed partial class SpotlightWindow : Window
     {
         var visual = ElementCompositionPreview.GetElementVisual(Card);
         var compositor = visual.Compositor;
-        var ease = compositor.CreateCubicBezierEasingFunction(new Vector2(0.22f, 1.18f), new Vector2(0.36f, 1f));
+        var ease = compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 1.1f), new Vector2(0.3f, 1f));
         var easeIn = compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0.9f), new Vector2(0.3f, 1f));
 
         _shown = true;

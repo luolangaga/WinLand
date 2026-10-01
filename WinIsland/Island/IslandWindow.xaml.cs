@@ -38,9 +38,9 @@ public sealed partial class IslandWindow : Window
     private const string QueuePagerGlyphDown = "\uE70D";
     private const string QueuePagerGlyphUp = "\uE70E";
     /// <summary>翻页动画：旧卡先走、新卡稍后进，与内容交接同一套节奏（两段错开一点点）。</summary>
-    private static readonly TimeSpan PageOutDuration = TimeSpan.FromMilliseconds(140);
-    private static readonly TimeSpan PageInDuration = TimeSpan.FromMilliseconds(200);
-    private static readonly TimeSpan PageInDelay = TimeSpan.FromMilliseconds(60);
+    private static readonly TimeSpan PageOutDuration = TimeSpan.FromMilliseconds(150);
+    private static readonly TimeSpan PageInDuration = TimeSpan.FromMilliseconds(240);
+    private static readonly TimeSpan PageInDelay = TimeSpan.FromMilliseconds(70);
     /// <summary>翻页时新卡内容层的起始缩放：只缩不放（恒 ≤ 1），所以永远不会越出卡片矩形。</summary>
     private const double PageEnterScale = 0.97;
     private static readonly string[] ScaleProperties = { "ScaleX", "ScaleY" };
@@ -75,11 +75,11 @@ public sealed partial class IslandWindow : Window
 
     private double ReadScale(string key)
         => Math.Clamp(_settings.Get(key, 100), ScaleMinPercent, ScaleMaxPercent) / 100.0;
-    private static readonly TimeSpan ExpandDuration = TimeSpan.FromMilliseconds(333);
-    private static readonly TimeSpan CollapseDuration = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan ExpandDuration = TimeSpan.FromMilliseconds(420);
+    private static readonly TimeSpan CollapseDuration = TimeSpan.FromMilliseconds(340);
     private const double MinCanvasWidth = 420;
     /// <summary>临时内容（消息 / 插件自定义内容）的尺寸 morph：比悬停展开略长一点，与内容交接同拍落地。</summary>
-    private static readonly TimeSpan TemporaryMorphDuration = TimeSpan.FromMilliseconds(280);
+    private static readonly TimeSpan TemporaryMorphDuration = TimeSpan.FromMilliseconds(340);
 
     // 位置（island.position / island.horizontal / 两条偏移）
     private const string PositionKey = "island.position";
@@ -113,10 +113,13 @@ public sealed partial class IslandWindow : Window
     private const double EdgeInset = 12;
     /// <summary>底部模式靠右、且量不到托盘区（TrayNotifyWnd）时的兜底预留量。</summary>
     private const double TrayReserve = 220;
-    private const int PositionSlideMs = 300;
+    private const int PositionSlideMs = 360;
     /// <summary>聚光卡打开时岛体淡出、关闭后淡入的时长（只动透明度，不碰窗口几何）。</summary>
-    private const int SpotlightFadeOutMs = 140;
-    private const int SpotlightFadeInMs = 180;
+    private const int SpotlightFadeOutMs = 160;
+    private const int SpotlightFadeInMs = 240;
+    /// <summary>岛体出现/消失（设置、任务栏、全屏避让、空闲隐藏）时的整块淡入/淡出时长。</summary>
+    private const int AppearFadeMs = 260;
+    private const int DisappearFadeMs = 180;
     /// <summary>
     /// 看门狗轮询周期：任务栏跟随 + 置顶自愈。shell 会在你点任务栏/开始菜单/搜索时把自己
     /// 抬到所有置顶窗口之上，岛整块被盖住，所以这个周期就是「被盖住到顶回来」的最坏延迟，取短一些。
@@ -607,7 +610,7 @@ public sealed partial class IslandWindow : Window
             return;
         }
 
-        UpdateVisibility(force: true);
+        UpdateVisibility(force: true, fade: false);
         if (!_shown)
         {
             IslandRoot.Opacity = 1;
@@ -644,7 +647,7 @@ public sealed partial class IslandWindow : Window
             From = IslandRoot.Opacity,
             To = to,
             Duration = new Duration(TimeSpan.FromMilliseconds(milliseconds)),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            EasingFunction = new CubicEase { EasingMode = to >= IslandRoot.Opacity ? EasingMode.EaseOut : EasingMode.EaseInOut },
         };
         Storyboard.SetTarget(animation, IslandRoot);
         Storyboard.SetTargetProperty(animation, "Opacity");
@@ -1572,7 +1575,8 @@ public sealed partial class IslandWindow : Window
         var version = ++_animVersion;
 
         var sb = new Storyboard();
-        var easing = SizeEasing(isTemporary, fromH, islandTarget.Height);
+        bool growing = islandTarget.Width * islandTarget.Height >= fromW * fromH;
+        var easing = SizeEasing(isTemporary, growing);
         sb.Children.Add(MakeSizeAnim(IslandRoot, "Width", fromW, islandTarget.Width, duration, easing));
         sb.Children.Add(MakeSizeAnim(IslandRoot, "Height", fromH, islandTarget.Height, duration, easing));
 
@@ -1591,21 +1595,19 @@ public sealed partial class IslandWindow : Window
     private Size _currentTotalSize = IdleBaseSize;
 
     /// <summary>
-    /// 尺寸动画的缓动。岛体一贯是"回弹"（BackEase EaseOut）；临时内容例外 ——
-    /// 回弹会在**收缩**方向上越过目标：胶囊缩得比目标还矮一截、内容被裁剪框切一刀再弹回来，
-    /// 一条消息这么缩一下很廉价。所以临时内容收缩时用纯 EaseOut（绝不越过目标），
-    /// 只有长大时才留一点点回弹（仍然是一次"弹出来"的入场）。
+    /// 尺寸动画的缓动：<b>长大</b>时用轻回弹（BackEase EaseOut，振幅小、时长长，读起来是一次顺滑的"弹出来"，
+    /// 不是抖一下）；<b>缩小</b>时一律用 QuinticEase EaseOut —— 起步快、末段缓缓收住，**绝不越过目标**
+    /// （回弹在收缩方向上会让胶囊缩得比目标还矮、内容被裁剪框切一刀再弹回来）。
+    /// 临时内容（消息 / <c>Island.Show</c>）长大时回弹更轻一点。
     ///
-    /// <c>island.bounce</c>（默认开）关掉后一律用纯 EaseOut：回弹对某些内容（实时波形、进度弧）
+    /// <c>island.bounce</c>（默认开）关掉后长大也用纯 EaseOut：回弹对某些内容（实时波形、进度弧）
     /// 会让动画看起来"多弹一下"，不想要的人可以整体关掉。
     /// </summary>
-    private EasingFunctionBase SizeEasing(bool temporary, double fromHeight, double toHeight)
+    private EasingFunctionBase SizeEasing(bool temporary, bool growing)
     {
-        if (!_settings.Get(BounceKey, true)) return new CubicEase { EasingMode = EasingMode.EaseOut };
-        if (!temporary) return new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.45 };
-        return toHeight < fromHeight
-            ? new CubicEase { EasingMode = EasingMode.EaseOut }
-            : new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.22 };
+        if (!growing || !_settings.Get(BounceKey, true))
+            return new QuinticEase { EasingMode = EasingMode.EaseOut };
+        return new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = temporary ? 0.2 : 0.3 };
     }
 
     private static DoubleAnimation MakeSizeAnim(
@@ -1631,9 +1633,9 @@ public sealed partial class IslandWindow : Window
 
     // 旧内容先走、新内容稍后进，两段错开约 80ms：这样读起来是"岛换了口气"，
     // 而不是两张画面叠在一起 —— 全程只有一次可感知的切换。
-    private static readonly TimeSpan ContentOutDuration = TimeSpan.FromMilliseconds(130);
-    private static readonly TimeSpan ContentInDelay = TimeSpan.FromMilliseconds(80);
-    private static readonly TimeSpan ContentInDuration = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan ContentOutDuration = TimeSpan.FromMilliseconds(150);
+    private static readonly TimeSpan ContentInDelay = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan ContentInDuration = TimeSpan.FromMilliseconds(240);
     private const double ContentOutSlide = -7;      // 旧内容上移让位（DIP）
     private const double ContentInSlide = 9;        // 新内容从下方进（DIP）
     private const double ContentInScale = 0.96;     // 新内容带一点"长出来"的缩放
@@ -1729,7 +1731,7 @@ public sealed partial class IslandWindow : Window
             To = to,
             Duration = new Duration(duration),
             BeginTime = delay,
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            EasingFunction = new QuinticEase { EasingMode = EasingMode.EaseOut },
         };
         Storyboard.SetTarget(animation, target);
         Storyboard.SetTargetProperty(animation, property);
@@ -2153,7 +2155,7 @@ public sealed partial class IslandWindow : Window
             return;
         }
 
-        double eased = 1 - Math.Pow(1 - p, 3);
+        double eased = 1 - Math.Pow(1 - p, 4);
         AppWindow.Move(new Windows.Graphics.PointInt32(
             _slideFromX + (int)Math.Round((_slideToX - _slideFromX) * eased),
             _slideFromY + (int)Math.Round((_slideToY - _slideFromY) * eased)));
@@ -2621,7 +2623,7 @@ public sealed partial class IslandWindow : Window
 
     #endregion
 
-    private void UpdateVisibility(bool force = false)
+    private void UpdateVisibility(bool force = false, bool fade = true)
     {
         bool hideIdle = _settings.Get("island.hideWhenIdle", false);
         bool visible = _settings.Get("island.visible", true)
@@ -2634,12 +2636,17 @@ public sealed partial class IslandWindow : Window
         _shown = visible;
         if (visible)
         {
+            // 窗口此刻是隐藏的：先把整块压成全透明，Show 之后再淡入（中途被重新要求显示则从当前透明度接着淡入）
+            bool fadeIn = fade && !AppWindow.IsVisible;
+            if (fadeIn) IslandRoot.Opacity = 0;
             AppWindow.Show(false);
             _presenter.IsAlwaysOnTop = false;
             _presenter.IsAlwaysOnTop = true;
             Win32.MakeIslandStyle(_hwnd);
             // MakeIslandStyle 里的 SWP_FRAMECHANGED 可能让窗口形状失效，重新断言一次
             UpdateHitRegion(force: true);
+            if (fade && (fadeIn || IslandRoot.Opacity < 1))
+                FadeIslandOpacity(1, AppearFadeMs, null);
         }
         else
         {
@@ -2647,7 +2654,18 @@ public sealed partial class IslandWindow : Window
             _hoverGuard.Stop();
             _hover = false;
             ClearTouchExpand();
-            AppWindow.Hide();
+            if (fade && AppWindow.IsVisible)
+            {
+                // 整块淡出后再真正隐藏；淡出期间若又要显示，FadeIslandOpacity 的版本号会让这次隐藏作废
+                FadeIslandOpacity(0, DisappearFadeMs, () =>
+                {
+                    if (!_shown && !_spotlightOccluded) AppWindow.Hide();
+                });
+            }
+            else
+            {
+                AppWindow.Hide();
+            }
         }
     }
 
