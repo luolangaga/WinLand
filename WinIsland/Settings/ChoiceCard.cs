@@ -358,7 +358,7 @@ internal sealed class ChoiceCard
         });
 
         const double height = 30;
-        var stroke = IslandStyle.CreateStroke(style, light);
+        var stroke = IslandStyle.CreateStroke(style, materialApplied, light);
         var pill = new Border
         {
             Width = 96,

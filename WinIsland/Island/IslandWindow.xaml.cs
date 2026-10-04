@@ -741,7 +741,11 @@ public sealed partial class IslandWindow : Window
     /// </summary>
     private void ApplyBackdrop()
     {
-        if (_style != IslandStyleKind.Fluent)
+        // Apple 默认不挂窗口材质 —— 纯黑胶囊是它的身份（也是「消息胶囊」那种观感）。
+        // 只有显式开了 island.appleGlass 才让 Apple 也走窗口材质：胶囊形状不变，内部变成液态玻璃。
+        var appleGlass = _settings.Get(IslandStyle.AppleGlassKey, false);
+        IslandStyle.AppleGlassEnabled = appleGlass;
+        if (_style != IslandStyleKind.Fluent && !appleGlass)
         {
             _materialApplied = false;
             if (_backdropOwned)
@@ -761,7 +765,9 @@ public sealed partial class IslandWindow : Window
             _backdropOwned = true;
         }
 
-        if (_backdrop.TryApply(_material, _light))
+        // 「纱」的颜色交给材质本身（消除外扩 1 DIP 那一圈亮边），底衬因此留全透明
+        var (tint, tintOpacity, luminosity) = IslandStyle.ResolveMaterialTint(_style, _light);
+        if (_backdrop.TryApply(_material, _light, tint, tintOpacity, luminosity))
         {
             _materialApplied = true;
             return;
@@ -3662,7 +3668,7 @@ public sealed partial class IslandWindow : Window
 
         public void ApplyStyle(IslandStyleKind style, bool materialApplied, bool light)
         {
-            var stroke = IslandStyle.CreateStroke(style, light);
+            var stroke = IslandStyle.CreateStroke(style, materialApplied, light);
             Border.Background = IslandStyle.CreateSurfaceFill(style, materialApplied, light);
             Border.BorderBrush = stroke;
             Border.BorderThickness = stroke == null ? new Thickness(0) : new Thickness(1);
@@ -3726,7 +3732,7 @@ public sealed partial class IslandWindow : Window
 
         public void ApplyStyle(IslandStyleKind style, bool materialApplied, bool light)
         {
-            var stroke = IslandStyle.CreateStroke(style, light);
+            var stroke = IslandStyle.CreateStroke(style, materialApplied, light);
             Border.Background = IslandStyle.CreateSurfaceFill(style, materialApplied, light);
             Border.BorderBrush = stroke;
             Border.BorderThickness = stroke == null ? new Thickness(0) : new Thickness(1);

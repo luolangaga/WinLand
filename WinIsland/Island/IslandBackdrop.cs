@@ -35,7 +35,9 @@ internal sealed class IslandBackdrop : IDisposable
     /// 挂上指定材质与明暗主题。系统不支持该材质时返回 false 且保持现状；
     /// 材质没变时只更新主题（主题切换不该重建控制器，那会闪一下）。
     /// </summary>
-    public bool TryApply(IslandMaterialKind material, bool light)
+    public bool TryApply(
+        IslandMaterialKind material, bool light,
+        Windows.UI.Color? tint = null, float tintOpacity = 0f, float luminosity = 0f)
     {
         if (!IsSupported(material)) return false;
 
@@ -55,15 +57,42 @@ internal sealed class IslandBackdrop : IDisposable
         }
         else
         {
-            if (_acrylic != null) return true;
+            if (_acrylic != null)
+            {
+                ApplyAcrylicTint(_acrylic, tint, tintOpacity, luminosity);
+                return true;
+            }
 
             var controller = new DesktopAcrylicController();
+            ApplyAcrylicTint(controller, tint, tintOpacity, luminosity);
             controller.AddSystemBackdropTarget(target);
             controller.SetSystemBackdropConfiguration(_configuration);
             Replace(acrylic: controller, mica: null);
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// 把岛体的「纱」直接做进材质色调里。
+    ///
+    /// 材质铺满整个窗口形状（含那 1 DIP 的外扩余量），而 XAML 底衬只盖到岛体实际尺寸 ——
+    /// 颜色如果涂在底衬上，外围那一圈就只剩材质，读成「没铺满的亮边」。
+    /// 做进材质，整块形状颜色一致，圈消失。
+    /// </summary>
+    private static void ApplyAcrylicTint(
+        DesktopAcrylicController controller, Windows.UI.Color? tint, float tintOpacity, float luminosity)
+    {
+        if (tint is not { } color) return;
+
+        controller.TintColor = color;
+        controller.TintOpacity = tintOpacity;
+        controller.LuminosityOpacity = luminosity;
+
+        // 兜底：系统关了透明效果 / 省电模式下材质会退化成纯色，
+        // 这里给一个带透明的兜底色，绝不能变成不透明的黑块
+        controller.FallbackColor = Windows.UI.Color.FromArgb(
+            200, (byte)(color.R + 28), (byte)(color.G + 28), (byte)(color.B + 32));
     }
 
     public void Clear() => Replace(acrylic: null, mica: null);

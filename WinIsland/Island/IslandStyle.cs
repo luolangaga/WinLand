@@ -39,6 +39,21 @@ public static class IslandStyle
     public const string StyleKey = "island.style";
     public const string MaterialKey = "island.material";
 
+    /// <summary>
+    /// Apple 胶囊是不是也用窗口材质（液态玻璃）。默认关 ——
+    /// 关着的时候 Apple 就是它本来的样子：不透明纯黑胶囊（这是它的身份）。
+    /// 开了之后 Apple 保留胶囊形状与圆角，但内部变成半透明黑纱，
+    /// 透过它能看到窗口级 Desktop Acrylic 实时模糊出来的背后内容。
+    /// </summary>
+    public const string AppleGlassKey = "island.appleGlass";
+
+    /// <summary>
+    /// Apple 玻璃模式当前是否生效（由 <c>IslandWindow.ApplyBackdrop</c> 在应用外观前写入）。
+    /// 做成静态是为了不给下面每一个取色方法都加一个 <c>appleGlass</c> 参数 ——
+    /// 整个进程只有一个岛窗口，这个值在一次 ApplyStyle 期间是稳定的。
+    /// </summary>
+    public static bool AppleGlassEnabled { get; set; }
+
     public const string AppleValue = "apple";
     public const string FluentValue = "fluent";
     public const string AcrylicValue = "acrylic";
@@ -62,6 +77,23 @@ public static class IslandStyle
     private const double FluentSpotlightRadius = 20;
 
     private static readonly Color AppleSurface = Color.FromArgb(255, 0, 0, 0);
+
+    /// <summary>
+    /// Apple 玻璃胶囊的黑纱。取 **66%（高级磨砂黑）**：
+    /// 极透（12%）会把白字对比度冲掉、看着像块塑料片；
+    /// 不透（100%）就是原来的纯黑胶囊、材质白挂。
+    /// 66% 是"有分量的磨砂"—— 背后内容隐约可见（磨砂感），白字依旧顶得住（可读性）。
+    /// </summary>
+    private static readonly Color AppleGlassSurface = Color.FromArgb(168, 0, 0, 0);
+
+    /// <summary>Apple 玻璃胶囊在浅色系统下的黑纱：浅色材质上不压纱，文字用深色即可。</summary>
+    private static readonly Color AppleGlassSurfaceLight = Color.FromArgb(0, 0, 0, 0);
+
+    /// <summary>Apple 玻璃胶囊的亮边：对角渐变用（左上最亮 → 右下消失）。</summary>
+    private static readonly Color AppleGlassRimBrightDark = Color.FromArgb(90, 255, 255, 255);
+    private static readonly Color AppleGlassRimDimDark = Color.FromArgb(26, 255, 255, 255);
+    private static readonly Color AppleGlassRimBrightLight = Color.FromArgb(70, 0, 0, 0);
+    private static readonly Color AppleGlassRimDimLight = Color.FromArgb(18, 0, 0, 0);
     private static readonly Color FluentSurfaceDark = Color.FromArgb(64, 0, 0, 0);
     /// <summary>
     /// 浅色主题**不压纱**（完全透明）：深色那层黑纱是为了保证白字对比度，
@@ -76,6 +108,9 @@ public static class IslandStyle
     private static readonly Color FluentIdleDotDark = Color.FromArgb(115, 255, 255, 255);
     private static readonly Color FluentIdleDotLight = Color.FromArgb(115, 0, 0, 0);
     private static readonly Color AppleSpotlightSurface = Color.FromArgb(245, 12, 12, 16);
+
+    /// <summary>Apple 玻璃模式下的聚光卡底衬：比原来透一档（245 → 205）。</summary>
+    private static readonly Color AppleSpotlightGlassSurface = Color.FromArgb(205, 12, 12, 16);
     private static readonly Color FluentSpotlightSurfaceDark = Color.FromArgb(232, 38, 38, 42);
     private static readonly Color FluentSpotlightSurfaceLight = Color.FromArgb(232, 249, 249, 249);
     private static readonly Color FluentSpotlightSolidSurfaceDark = Color.FromArgb(235, 26, 26, 30);
@@ -139,18 +174,67 @@ public static class IslandStyle
     /// 再叠白纱就成了平白板，那是"看不出材质"而不是"适配了浅色"。
     /// 材质不可用时退回接近不透明的纯色（深色 #202020 / 浅色 #F3F3F3），文字依旧可读。
     /// </summary>
+    /// <summary>
+    /// 材质色调：把岛体那层「纱」的颜色**交给窗口材质本身**，而不是靠 Border 的底衬涂。
+    ///
+    /// 为什么必须这样：点击形状比岛体渲染范围外扩 1 DIP（<c>IslandWindow.ShapeSlackDip</c>），
+    /// 材质铺满整个形状，而 Border 底衬只盖到实际尺寸 —— 外围那一圈只有材质、没有纱，
+    /// 在深色主题下读成「没铺满的一圈亮边」（AGENTS.md 把这条记为已知代价）。
+    /// 颜色交给材质后整块形状颜色完全一致，这一圈自然消失，而且不必动 ShapeSlack（圆角锯齿修复不受影响）。
+    /// </summary>
+    public static (Color Tint, float TintOpacity, float Luminosity) ResolveMaterialTint(
+        IslandStyleKind style, bool light)
+    {
+        if (style == IslandStyleKind.Apple)
+        {
+            // Apple 哑光黑胶囊：颜色照旧由不透明底衬负责，材质不需要色调
+            return (Color.FromArgb(255, 0, 0, 0), 0f, 0f);
+        }
+
+        // 浅色主题不压纱（压了就把材质冲成平白板）；深色主题压同样的 25% 黑，保证白字对比度
+        return light
+            ? (Color.FromArgb(255, 0, 0, 0), 0f, 0f)
+            : (Color.FromArgb(255, 0, 0, 0), FluentSurfaceDark.A / 255f, 0f);
+    }
+
     public static SolidColorBrush CreateSurfaceFill(IslandStyleKind style, bool materialApplied, bool light)
     {
-        if (style == IslandStyleKind.Apple) return new SolidColorBrush(AppleSurface);
-        if (materialApplied) return new SolidColorBrush(Pick(light, FluentSurfaceDark, FluentSurfaceLight));
+        if (style == IslandStyleKind.Apple)
+        {
+            // 玻璃模式的颜色已经做进材质本身了（见 IslandBackdrop.ApplyAcrylicTint）——
+            // 这里必须留**全透明**，否则底衬只盖到实际尺寸、外围那 1 DIP 又会露出一圈没铺满
+            if (materialApplied && AppleGlassEnabled)
+            {
+                return new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
+            }
+
+            return new SolidColorBrush(AppleSurface);
+        }
+
+        // 有材质时底衬留**全透明** —— 那层纱已经由材质色调负责（见 ResolveMaterialTint），
+        // 在这里再涂一层只盖到实际尺寸的纱，就会重新长出那一圈亮边。
+        if (materialApplied) return new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
         return new SolidColorBrush(Pick(light, FluentSolidSurfaceDark, FluentSolidSurfaceLight));
     }
 
-    /// <summary>岛体描边：仅 Fluent 使用 1px 细描边（深色主题浅描边、浅色主题深描边）。</summary>
-    public static SolidColorBrush? CreateStroke(IslandStyleKind style, bool light)
-        => style == IslandStyleKind.Fluent
-            ? new SolidColorBrush(Pick(light, FluentStrokeDark, FluentStrokeLight))
-            : null;
+    /// <summary>
+    /// 岛体描边：Fluent 用 1px 细描边；Apple 玻璃模式用**对角渐变**的亮边。
+    ///
+    /// 玻璃感的关键就在这里：均匀一圈亮边看着像描边框，
+    /// 而「左上最亮 → 右下几乎消失」才是光从左上打过来的真实样子
+    /// （Windows 7 Aero、iOS 26 都是这么处理的）。
+    /// </summary>
+    public static Brush? CreateStroke(IslandStyleKind style, bool materialApplied, bool light)
+    {
+        if (style == IslandStyleKind.Apple)
+        {
+            // 用户要的是「纯色 + 像水一样透明」：不要任何描边。
+            // 一圈亮边（尤其对角渐变的）在纯色玻璃上只会读成"不协调的框"。
+            return null;
+        }
+
+        return new SolidColorBrush(Pick(light, FluentStrokeDark, FluentStrokeLight));
+    }
 
     /// <summary>空闲小点颜色：纯黑胶囊上用深灰（现状），系统材质上用半透明的白（深色）/ 黑（浅色）。</summary>
     public static Color IdleDotColor(IslandStyleKind style, bool light)
@@ -170,7 +254,13 @@ public static class IslandStyle
     /// </summary>
     public static SolidColorBrush CreateSpotlightFill(IslandStyleKind style, bool materialApplied, bool light)
     {
-        if (style == IslandStyleKind.Apple) return new SolidColorBrush(AppleSpotlightSurface);
+        if (style == IslandStyleKind.Apple)
+        {
+            // 玻璃胶囊模式下卡片也留一点透明度（覆盖窗没有自己的材质，
+            // 所以这里透出来的是暗化遮罩 —— 只有轻微差别，但和岛体是一套观感）
+            return new SolidColorBrush(materialApplied ? AppleSpotlightGlassSurface : AppleSpotlightSurface);
+        }
+
         return new SolidColorBrush(materialApplied
             ? Pick(light, FluentSpotlightSurfaceDark, FluentSpotlightSurfaceLight)
             : Pick(light, FluentSpotlightSolidSurfaceDark, FluentSpotlightSolidSurfaceLight));
@@ -191,6 +281,8 @@ public static class IslandStyle
     /// </summary>
     public static LinearGradientBrush? CreateTopHighlight(IslandStyleKind style, bool light)
     {
+        // Apple 的目标是「纯色、像水一样透明」—— 一道受光边只会让它看起来是两截。
+        // 只有 Fluent（作者原生的材质风格）才用这道高光。
         if (style != IslandStyleKind.Fluent) return null;
 
         var color = Pick(light, TopHighlightDark, TopHighlightLight);
