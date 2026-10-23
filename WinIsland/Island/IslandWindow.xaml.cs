@@ -201,6 +201,8 @@ public sealed partial class IslandWindow : Window
 
     // 外观风格（island.style / island.material）：材质、底衬、描边、圆角与空闲点颜色都由它决定
     private readonly IslandSurface _mainSurface;
+    /// <summary>主岛顶边那一笔描边（由 <see cref="SyncTopEdge"/> 摆位）：卡片自己画不到最外沿。</summary>
+    private readonly Border _topEdge;
     private readonly List<IslandSurface> _queueSurfaces = new();
     /// <summary>
     /// 翻页位（展开队列最后一张卡）指向的队列下标与卡面主人（插件 id）。插件 SetLive 刷新会不断重建队列、
@@ -355,6 +357,18 @@ public sealed partial class IslandWindow : Window
 
         _mainSurface = new IslandSurface(IslandRoot, ContentHost);
 
+        // 卡片描边画在外沿内侧 1px，而卡片上方还漏着 1px 窗口背衬：浅色下这一行与卡片同色，
+        // 描边就被挤到第二行，看上去像岛顶多了一条线（深色背衬是暗的，所以那边看不出来）。
+        // 这条线挂在 IslandStack 里、与卡片同一行，靠 -1 边距顶进那 1px，替卡片把顶边画到最外沿。
+        _topEdge = new Border
+        {
+            Height = 1,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Top,
+            IsHitTestVisible = false,
+        };
+        IslandStack.Children.Add(_topEdge);
+
         // 内容交接用的位移/缩放（只动组合级属性，和尺寸 morph 逐帧共存）
         ContentHost.RenderTransform = _contentSlide;
         ContentHost.RenderTransformOrigin = new Point(0.5, 0.5);
@@ -401,6 +415,7 @@ public sealed partial class IslandWindow : Window
             _clip.Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height);
             // 尺寸动画逐帧改变实际大小，点击穿透区域必须同步跟随
             UpdateHitRegion();
+            SyncTopEdge();
         };
 
         // DPI 变化时画布的逻辑尺寸不变，但物理像素尺寸需要重新应用（缩放、位置、命中区域）
@@ -747,8 +762,23 @@ public sealed partial class IslandWindow : Window
         RefreshQueueStyle();
         UpdateHitRegion(force: true);
         _idleDot.Fill = new SolidColorBrush(IslandStyle.IdleDotColor(_style, _light));
+        var edge = IslandStyle.CreateStroke(_style, _light);
+        _topEdge.Background = edge ?? new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        // 顶边交给 _topEdge，卡片自己那条去掉，否则会画出两道
+        IslandRoot.BorderThickness = edge == null ? new Thickness(0) : new Thickness(1, 0, 1, 1);
+        SyncTopEdge();
         _log.Debug($"外观已应用：风格 {_style.ToValue()}，材质 {_material.ToValue()}"
                    + $"{(_materialApplied ? "" : "（不可用，已回退纯色底衬）")}，岛体明暗 {(_light ? "浅色" : "深色")}。");
+    }
+
+    /// <summary>顶边线跟着卡片走：同一行、同宽，再往上挪 1px 盖住卡片上方漏出的那一行。</summary>
+    private void SyncTopEdge()
+    {
+        Grid.SetRow(_topEdge, Grid.GetRow(IslandRoot));
+        _topEdge.HorizontalAlignment = IslandRoot.HorizontalAlignment;
+        _topEdge.Margin = new Thickness(0, -1, 0, 0);
+        _topEdge.Width = IslandRoot.ActualWidth;
+        _topEdge.Visibility = _topEdge.Width > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>岛体是否按浅色配色渲染（= <see cref="_light"/>）：聚光卡、插件侧也都取这一个值。</summary>
@@ -1911,6 +1941,7 @@ public sealed partial class IslandWindow : Window
         IslandStack.VerticalAlignment = bottom ? VerticalAlignment.Bottom : VerticalAlignment.Top;
         Grid.SetRow(IslandRoot, bottom ? 1 : 0);
         Grid.SetRow(QueuePanel, bottom ? 0 : 1);
+        SyncTopEdge();
 
         // 水平对齐：整栈 + 岛体 + 队列一起靠同一侧。
         // 岛体跟着对齐侧生长（靠左向右长、靠右向左长），否则展开时会向两侧对称生长、
@@ -3792,6 +3823,8 @@ public sealed partial class IslandWindow : Window
             var highlight = IslandStyle.CreateTopHighlight(style, light);
             _highlight.Background = highlight;
             _highlight.Opacity = highlight == null ? 0 : 1;
+            // 浅色下要高光紧贴描边：中间隔一行填充，这道反光就被冲淡到看不见了
+            _highlight.Margin = new Thickness(1, light ? 0 : 1, 1, 0);
         }
 
         public void SetRadius(double radius) => Border.CornerRadius = new CornerRadius(radius);

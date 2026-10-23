@@ -190,7 +190,8 @@ public static class IslandStyle
     // ---- Fluent 岛体上缘的 1px 高光（玻璃反光）----
 
     private static readonly Color TopHighlightDark = Color.FromArgb(28, 255, 255, 255);
-    private static readonly Color TopHighlightLight = Color.FromArgb(72, 255, 255, 255);
+    // 浅色的填充接近纯白，高光再淡就抬不动：28% 只亮 2 级（等于没有），这一档才读得出反光
+    private static readonly Color TopHighlightLight = Color.FromArgb(210, 255, 255, 255);
 
     /// <summary>
     /// Fluent 岛体/卡片上缘的 1px 渐变高光（两端渐隐，圆角处自然收掉，不需要额外裁剪）。
