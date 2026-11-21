@@ -24,6 +24,19 @@ public sealed partial class XamlPluginView : UserControl, IMorphView
         _morphTimer.Interval = TimeSpan.FromMilliseconds(16);
         _morphTimer.IsRepeating = true;
         _morphTimer.Tick += (_, _) => OnMorphTick();
+
+        Loaded += (_, _) =>
+        {
+            if (Math.Abs(CurrentProgress - _morphTarget) > 1e-4)
+                _morphTimer.Start();
+        };
+
+        Unloaded += (_, _) =>
+        {
+            if (IsLoaded) return;
+            _morphTimer.Stop();
+            Apply(_morphTarget);
+        };
     }
 
     public UIElement View => this;
