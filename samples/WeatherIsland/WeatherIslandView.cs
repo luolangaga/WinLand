@@ -132,7 +132,18 @@ public sealed class WeatherIslandView : UserControl, IMorphView
             _morphTimer.Tick += (_, _) => OnMorphTick();
         }
 
-        Unloaded += (_, _) => _morphTimer?.Stop();
+        Loaded += (_, _) =>
+        {
+            if (Math.Abs(_progress - _morphTarget) > 1e-4)
+                _morphTimer?.Start();
+        };
+
+        Unloaded += (_, _) =>
+        {
+            if (IsLoaded) return;
+            _morphTimer?.Stop();
+            ApplyMorph(_morphTarget);
+        };
     }
 
     public UIElement View => this;

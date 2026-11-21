@@ -970,14 +970,16 @@ public sealed partial class IslandWindow : Window
         => _settings.Get<double?>($"plugin.{owner}.priority", null) ?? content.Priority;
 
     /// <summary>
-    /// 展开优先级：宿主设置 <c>plugin.&lt;id&gt;.expandedPriority</c> 覆盖插件声明的
-    /// <see cref="IslandLiveContent.ExpandedPriority"/>；两者都没有时回退到原优先级 ——
-    /// 所以只要没人设置这个新值，展开顺序与旧行为逐字一致。
+    /// 展开优先级：宿主设置 <c>plugin.&lt;id&gt;.expandedPriority</c> 优先；若用户在设置里留空
+    /// （设置页提示为「留空＝与优先级相同」），但显式覆盖了宿主侧 <c>plugin.&lt;id&gt;.priority</c>，
+    /// 则展开优先级跟随用户的宿主优先级覆盖；两者都未由用户在宿主设置里配置时，才回退到插件声明的
+    /// <see cref="IslandLiveContent.ExpandedPriority"/> 与 <see cref="IslandLiveContent.Priority"/>。
     /// </summary>
     private double ExpandedPriority(string owner, IslandLiveContent content)
         => _settings.Get<double?>($"plugin.{owner}.expandedPriority", null)
+           ?? _settings.Get<double?>($"plugin.{owner}.priority", null)
            ?? content.ExpandedPriority
-           ?? EffectivePriority(owner, content);
+           ?? content.Priority;
 
     /// <summary>
     /// 当前内容集合在「空闲 / 临时消息 / 紧凑 / 展开 + 队列」各状态下所需的最大画布尺寸（含透明 padding）。
@@ -1060,12 +1062,15 @@ public sealed partial class IslandWindow : Window
 
         if (live.MorphView != null)
         {
-            // 确保 View 在 ContentHost 里（同一棵树内换位时交接会自动跳过动画）
-            if (tempCard) SwapContentForTempCard(live.MorphView.View);
-            else SwapContent(live.MorphView.View, animate: true);
             if (wantExpand)
             {
                 _expanded = true;
+                // 若展开前 ContentHost 里装的是临时消息或另一个常驻插件视图（即将移入队列卡片），
+                // 不能留在 ContentLeaving 层再被 BuildQueue 强行摘除（避免双次重挂载触发异步 Unloaded）
+                if (tempCard || !ReferenceEquals(ContentHost.Content, live.MorphView.View))
+                    SwapContentForTempCard(live.MorphView.View);
+                else
+                    SwapContent(live.MorphView.View, animate: true);
                 AnimateIslandSize(ExpandedMainSize(), ExpandDuration);
                 ApplyCornerRadius(live.ExpandedSize.Height, expanded: true);
                 AnimateMorphView(ActiveOwner, live.MorphView, expand: true);
@@ -1076,6 +1081,7 @@ public sealed partial class IslandWindow : Window
                 _expanded = false;
                 TeardownQueue();
                 CompactOutgoingMain(live);
+                SwapContent(live.MorphView.View, animate: true);
                 Size compact = CompactSizeOf(live);
                 AnimateIslandSize(compact, CollapseDuration);
                 ApplyCornerRadius(compact.Height, expanded: false);
@@ -1380,34 +1386,35 @@ public sealed partial class IslandWindow : Window
         _pager = null;
         _tailSurface = null;
 
-        if (_queueSurfaces.Count == 0)
+        var live = ActiveLive;
+
+        if (_queueSurfaces.Count > 0)
         {
-            QueuePanel.Visibility = Visibility.Collapsed;
-            return;
+            // 先停止队列中所有 MorphView 的动画：用卡片自己记录的 owner/view，
+            // 这样活动顺序刚变化时也不会误动到别的视图（例如已经变成主岛的那个）。
+            // 若某张队列卡正好是收起后即将回到主岛的 ActiveLive，交由后续主岛收起流程在挂载到 ContentHost 后统一驱动动画。
+            foreach (var surface in _queueSurfaces)
+            {
+                if (live?.MorphView != null && ReferenceEquals(surface.MorphView, live.MorphView)) continue;
+                AnimateMorphView(surface.Owner ?? "(未知)", surface.MorphView, expand: false);
+            }
+
+            // 从卡片中取出 MorphView.View（断开父子关系）
+            // WinUI: 把 ContentPresenter.Content 置空即断开引用
+            foreach (var surface in _queueSurfaces)
+            {
+                surface.SetContent(null);
+            }
+
+            _queueSurfaces.Clear();
+            QueuePanel.Children.Clear();
         }
 
-        // 先停止队列中所有 MorphView 的动画：用卡片自己记录的 owner/view，
-        // 这样活动顺序刚变化时也不会误动到别的视图（例如已经变成主岛的那个）
-        foreach (var surface in _queueSurfaces)
-        {
-            AnimateMorphView(surface.Owner ?? "(未知)", surface.MorphView, expand: false);
-        }
-
-        // 从卡片中取出 MorphView.View（断开父子关系）
-        // WinUI: 把 ContentPresenter.Content 置空即断开引用
-        foreach (var surface in _queueSurfaces)
-        {
-            surface.SetContent(null);
-        }
-
-        _queueSurfaces.Clear();
-        QueuePanel.Children.Clear();
         QueuePanel.Visibility = Visibility.Collapsed;
 
-        // 确保主活动的 View 在 ContentHost 里（可能被队列 Border 占用过）。
+        // 确保主活动的 View 在 ContentHost 里（可能被队列 Border 占用过，或展开主卡与小岛常驻不同且无队列卡片）。
         // 临时消息/投放面板占着岛体时不动内容层：那时 ContentHost 里是消息，
         // 换成插件视图会让紧随其后的交接动画从错误的内容起步（屏幕上会闪一下插件视图）。
-        var live = ActiveLive;
         if (_tempContent == null && !_dropping
             && live?.MorphView != null && !ReferenceEquals(ContentHost.Content, live.MorphView.View))
         {
@@ -1518,8 +1525,10 @@ public sealed partial class IslandWindow : Window
 
         if (live.MorphView != null)
         {
-            if (tempCard) SwapContentForTempCard(live.MorphView.View);
-            else SwapContent(live.MorphView.View, animate: true);
+            if (tempCard || !ReferenceEquals(ContentHost.Content, live.MorphView.View))
+                SwapContentForTempCard(live.MorphView.View);
+            else
+                SwapContent(live.MorphView.View, animate: true);
             AnimateIslandSize(ExpandedMainSize(), ExpandDuration);
             ApplyCornerRadius(live.ExpandedSize.Height, expanded: true);
             AnimateMorphView(ActiveOwner, live.MorphView, expand: true);

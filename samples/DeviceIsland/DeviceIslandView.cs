@@ -187,9 +187,17 @@ public sealed class DeviceIslandView : UserControl, IMorphView
             _flashTimer.Tick += (_, _) => OnFlashTick();
         }
 
+        Loaded += (_, _) =>
+        {
+            if (Math.Abs(_progress - _morphTarget) > 1e-4)
+                _morphTimer?.Start();
+        };
+
         Unloaded += (_, _) =>
         {
+            if (IsLoaded) return;
             _morphTimer?.Stop();
+            ApplyMorph(_morphTarget);
             _flashTimer?.Stop();
         };
     }
