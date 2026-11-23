@@ -16,11 +16,13 @@ public sealed partial class MediaSettingsPage : UserControl
         _settings = context.Settings;
         _plugin = plugin;
         InitializeComponent();
+        BackgroundOptions.Children.Add(new WinIsland.Settings.BackgroundEffectSettings(_settings, false));
 
         EnableToggle.IsOn = _settings.Get("enabled", true);
+        WaveToggle.IsOn = _settings.Get("wave", true);
         GlowToggle.IsOn = _settings.Get("glow", true);
         LyricsToggle.IsOn = _settings.Get("lyrics", true);
-        PrioritySlider.Value = _settings.Get("priority", 100);
+        PrioritySlider.Value = _settings.Get("priority", 200);
         StatusText.Text = _plugin.StatusText;
         _loading = false;
     }
@@ -29,6 +31,11 @@ public sealed partial class MediaSettingsPage : UserControl
     {
         if (_loading) return;
         _settings.Set("enabled", EnableToggle.IsOn);
+    }
+
+    private void WaveToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_loading) _settings.Set("wave", WaveToggle.IsOn);
     }
 
     private void GlowToggle_Toggled(object sender, RoutedEventArgs e)

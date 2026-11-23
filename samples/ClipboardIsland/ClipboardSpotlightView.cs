@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using WinIsland.Core;
+using WinIsland.PluginViews;
 
 namespace ClipboardIsland;
 
@@ -30,6 +31,7 @@ public sealed class ClipboardSpotlightView : UserControl
     private readonly ScrollViewer _scroller;
 
     private bool _confirmClear;
+    private ClipItem[] _displayedItems = [];
 
     /// <summary>中性色：岛体深色时是白色系，浅色（Fluent + 浅色系统）时是黑色系。</summary>
     private Windows.UI.Color Neutral(byte alpha) => _theme.IsLight
@@ -79,13 +81,13 @@ public sealed class ClipboardSpotlightView : UserControl
 
         var hint = new TextBlock
         {
-            Text = "点任意一条直接粘进你正在输入的窗口 · 按住往右拖一条就把它删掉 · 按 Esc 或点卡片外区域收起",
+            Text = "选择记录粘贴到原窗口，右滑可删除。",
             FontSize = 12.5,
             TextWrapping = TextWrapping.Wrap,
             Foreground = _hintBrush,
         };
 
-        _rows = new StackPanel { Spacing = 2 };
+        _rows = new StackPanel { Spacing = 6 };
 
         _empty = new TextBlock
         {
@@ -140,10 +142,17 @@ public sealed class ClipboardSpotlightView : UserControl
 
         _count.Text = items.Count > 0 ? $"{items.Count} 条" : string.Empty;
 
-        _rows.Children.Clear();
-        foreach (var item in items)
+        if (!_displayedItems.SequenceEqual(items))
         {
-            _rows.Children.Add(new ClipRow(item, _theme, interactive: true, invoke: _onPick, onDelete: _onDelete));
+            var previousIds = _displayedItems.Select(item => item.Id).ToHashSet();
+            _displayedItems = items.ToArray();
+            _rows.Children.Clear();
+            foreach (var item in items)
+            {
+                var row = new ClipRow(item, _theme, interactive: true, invoke: _onPick, onDelete: _onDelete);
+                _rows.Children.Add(row);
+                if (IsLoaded && !previousIds.Contains(item.Id)) Motion.Reveal(row, 180, 4);
+            }
         }
 
         var hasItems = items.Count > 0;
@@ -159,6 +168,13 @@ public sealed class ClipboardSpotlightView : UserControl
 
     /// <summary>宿主收起卡片时回调（点卡片外 / Esc / 被别的插件替换 / 插件停用）。</summary>
     public void OnHostClosed() => ResetClearButton();
+
+    internal void RefreshTheme()
+    {
+        _textBrush.Color = Neutral(255);
+        _hintBrush.Color = Neutral(150);
+        foreach (var child in _rows.Children) if (child is ClipRow row) row.RefreshTheme();
+    }
 
     private void OnClearClick()
     {

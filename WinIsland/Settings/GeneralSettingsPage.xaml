@@ -13,7 +13,9 @@
             Margin="0,0,0,12"
             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
             Style="{StaticResource CaptionTextBlockStyle}"
-            Text="灵动岛外观与行为" />
+            Text="外观、位置与交互，按你的方式运行。" />
+
+        <TextBlock Style="{StaticResource SettingsSectionHeadingStyle}" Text="外观与材质" />
 
         <Border Style="{StaticResource SettingsCardStyle}">
             <StackPanel Spacing="4">
@@ -56,7 +58,7 @@
                             TextWrapping="Wrap" />
                     </StackPanel>
                     <Slider
-                        x:Name="RadiusSlider"
+ AutomationProperties.AutomationId="RadiusSlider"                        x:Name="RadiusSlider"
                         Grid.Column="1"
                         Width="200"
                         Maximum="200"
@@ -79,7 +81,7 @@
                             TextWrapping="Wrap" />
                     </StackPanel>
                     <Slider
-                        x:Name="OpacitySlider"
+ AutomationProperties.AutomationId="OpacitySlider"                        x:Name="OpacitySlider"
                         Grid.Column="1"
                         Width="200"
                         Maximum="100"
@@ -90,6 +92,8 @@
                 </Grid>
             </StackPanel>
         </Border>
+
+        <TextBlock Style="{StaticResource SettingsSectionHeadingStyle}" Text="日常交互" />
 
         <Border Style="{StaticResource SettingsCardStyle}">
             <Grid ColumnSpacing="16">
@@ -106,7 +110,7 @@
                         TextWrapping="Wrap" />
                 </StackPanel>
                 <ToggleSwitch
-                    x:Name="VisibleToggle"
+ AutomationProperties.AutomationId="VisibleToggle"                    x:Name="VisibleToggle"
                     Grid.Column="1"
                     MinWidth="0"
                     VerticalAlignment="Center"
@@ -116,6 +120,9 @@
             </Grid>
         </Border>
 
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <ToggleSwitch x:Name="IdleEdgeToggle" Header="空闲时贴边隐藏（靠近屏幕边缘唤出）" Toggled="IdleEdgeToggle_Toggled" />
+        </Border>
         <Border Style="{StaticResource SettingsCardStyle}">
             <Grid ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
@@ -131,13 +138,36 @@
                         TextWrapping="Wrap" />
                 </StackPanel>
                 <ToggleSwitch
-                    x:Name="HideIdleToggle"
+ AutomationProperties.AutomationId="HideIdleToggle"                    x:Name="HideIdleToggle"
                     Grid.Column="1"
                     MinWidth="0"
                     VerticalAlignment="Center"
                     OffContent=""
                     OnContent=""
                     Toggled="HideIdleToggle_Toggled" />
+            </Grid>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="活动岛数量" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="有多个活动岛时，在主岛旁显示数字圆点（包含未显示的队列卡片）"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <ToggleSwitch x:Name="ActivityCountToggle"
+                              Grid.Column="1" MinWidth="0" VerticalAlignment="Center"
+                              AutomationProperties.AutomationId="ActivityCountToggle"
+                              AutomationProperties.Name="显示活动岛数量"
+                              OffContent="" OnContent=""
+                              Toggled="ActivityCountToggle_Toggled" />
             </Grid>
         </Border>
 
@@ -156,7 +186,7 @@
                         TextWrapping="Wrap" />
                 </StackPanel>
                 <ToggleSwitch
-                    x:Name="HoverExpandToggle"
+ AutomationProperties.AutomationId="HoverExpandToggle"                    x:Name="HoverExpandToggle"
                     Grid.Column="1"
                     MinWidth="0"
                     VerticalAlignment="Center"
@@ -181,7 +211,7 @@
                         TextWrapping="Wrap" />
                 </StackPanel>
                 <Slider
-                    x:Name="HoverDelaySlider"
+ AutomationProperties.AutomationId="HoverDelaySlider"                    x:Name="HoverDelaySlider"
                     Grid.Column="1"
                     Width="200"
                     Maximum="600"
@@ -203,11 +233,11 @@
                     <TextBlock
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="岛体长大/缩小时带回弹（BackEase）；关掉后是干脆的缓出，不会越过目标尺寸"
+                        Text="展开时轻盈回弹，收起时平稳缓出；关闭后使用柔和的缓出动画"
                         TextWrapping="Wrap" />
                 </StackPanel>
                 <ToggleSwitch
-                    x:Name="BounceToggle"
+ AutomationProperties.AutomationId="BounceToggle"                    x:Name="BounceToggle"
                     Grid.Column="1"
                     MinWidth="0"
                     VerticalAlignment="Center"
@@ -232,7 +262,7 @@
                         TextWrapping="Wrap" />
                 </StackPanel>
                 <ToggleSwitch
-                    x:Name="DropToggle"
+ AutomationProperties.AutomationId="DropToggle"                    x:Name="DropToggle"
                     Grid.Column="1"
                     MinWidth="0"
                     VerticalAlignment="Center"
@@ -241,6 +271,70 @@
                     Toggled="DropToggle_Toggled" />
             </Grid>
         </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="勿扰" />
+                    <TextBlock
+                        x:Name="QuietHint"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="静默期间不弹临时消息、也不因新活动自动现身；消息照样记进历史"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <ComboBox
+                        x:Name="QuietCombo"
+                        MinWidth="120"
+                        AutomationProperties.AutomationId="QuietCombo"
+                        AutomationProperties.Name="静默时长"
+                        SelectionChanged="QuietCombo_SelectionChanged">
+                        <ComboBoxItem Content="15 分钟" />
+                        <ComboBoxItem Content="30 分钟" />
+                        <ComboBoxItem Content="1 小时" />
+                        <ComboBoxItem Content="2 小时" />
+                    </ComboBox>
+                    <Button
+                        x:Name="QuietButton"
+                        AutomationProperties.AutomationId="QuietButton"
+                        Click="QuietButton_Click"
+                        Content="开始静默" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="手动位置" />
+                    <TextBlock
+                        x:Name="DragPlacementHint"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="按住 Alt 再拖岛体（或按住中键拖动）可以把它摆到任意位置；改了位置/对齐设置会自动回到自动落位"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <Button
+                    x:Name="ResetPlacementButton"
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    AutomationProperties.AutomationId="ResetPlacementButton"
+                    Click="ResetPlacement_Click"
+                    Content="恢复自动对齐"
+                    IsEnabled="False" />
+            </Grid>
+        </Border>
+
+        <TextBlock Style="{StaticResource SettingsSectionHeadingStyle}" Text="全屏与缩放" />
 
         <Border Style="{StaticResource SettingsCardStyle}">
             <StackPanel Spacing="4">
@@ -271,7 +365,7 @@
                             TextWrapping="Wrap" />
                     </StackPanel>
                     <Slider
-                        x:Name="ScaleIslandSlider"
+ AutomationProperties.AutomationId="ScaleIslandSlider"                        x:Name="ScaleIslandSlider"
                         Grid.Column="1"
                         Width="200"
                         Maximum="200"
@@ -294,7 +388,7 @@
                             TextWrapping="Wrap" />
                     </StackPanel>
                     <Slider
-                        x:Name="ScaleIdleSlider"
+ AutomationProperties.AutomationId="ScaleIdleSlider"                        x:Name="ScaleIdleSlider"
                         Grid.Column="1"
                         Width="200"
                         Maximum="200"
@@ -317,7 +411,7 @@
                             TextWrapping="Wrap" />
                     </StackPanel>
                     <Slider
-                        x:Name="ScaleStripSlider"
+ AutomationProperties.AutomationId="ScaleStripSlider"                        x:Name="ScaleStripSlider"
                         Grid.Column="1"
                         Width="200"
                         Maximum="200"
@@ -328,6 +422,8 @@
                 </Grid>
             </StackPanel>
         </Border>
+
+        <TextBlock Style="{StaticResource SettingsSectionHeadingStyle}" Text="位置与屏幕" />
 
         <Border Style="{StaticResource SettingsCardStyle}">
             <StackPanel Spacing="4">
@@ -382,11 +478,11 @@
                         TextWrapping="Wrap" />
                 </StackPanel>
                 <Slider
-                    x:Name="OffsetSlider"
+ AutomationProperties.AutomationId="OffsetSlider"                    x:Name="OffsetSlider"
                     Grid.Column="1"
                     Width="200"
-                    Maximum="80"
-                    Minimum="0"
+                    Maximum="2000"
+                    Minimum="-2000"
                     StepFrequency="2"
                     VerticalAlignment="Center"
                     ValueChanged="OffsetSlider_ValueChanged" />
@@ -408,16 +504,18 @@
                         TextWrapping="Wrap" />
                 </StackPanel>
                 <Slider
-                    x:Name="HorizontalOffsetSlider"
+ AutomationProperties.AutomationId="HorizontalOffsetSlider"                    x:Name="HorizontalOffsetSlider"
                     Grid.Column="1"
                     Width="200"
-                    Maximum="500"
-                    Minimum="-500"
+                    Maximum="4000"
+                    Minimum="-4000"
                     StepFrequency="2"
                     VerticalAlignment="Center"
                     ValueChanged="HorizontalOffsetSlider_ValueChanged" />
             </Grid>
         </Border>
+
+        <TextBlock Style="{StaticResource SettingsSectionHeadingStyle}" Text="启动与引导" />
 
         <Border Style="{StaticResource SettingsCardStyle}">
             <StackPanel Spacing="4">

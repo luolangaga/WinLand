@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../WinIsland.Core/WinIsland.Core.csproj" />
+    <Compile Include="../../WinIsland/Core/SettingsService.cs" Link="SettingsService.cs" />
+    <Compile Include="../../WinIsland/Core/CommandLine.cs" Link="CommandLine.cs" />
+    <Compile Include="../../WinIsland/Core/PluginBus.cs" Link="PluginBus.cs" />
+    <Compile Include="../../WinIsland/Core/QuietMode.cs" Link="QuietMode.cs" />
+    <Compile Include="../../WinIsland/Core/MessageHistory.cs" Link="MessageHistory.cs" />
+    <Compile Include="../../WinIsland/Core/StartupGuard.cs" Link="StartupGuard.cs" />
+    <Compile Include="../../WinIsland/Core/Plugins/PluginScope.cs" Link="PluginScope.cs" />
+    <Compile Include="../../WinIsland/Core/Plugins/ScopedSettings.cs" Link="ScopedSettings.cs" />
+    <Compile Include="../../WinIsland/Core/Plugins/LwpInstaller.cs" Link="LwpInstaller.cs" />
+    <Compile Include="../../WinIsland/Core/Plugins/PluginManifestReader.cs" Link="PluginManifestReader.cs" />
+    <Compile Include="../../WinIsland/Island/IslandWindowKeys.cs" Link="IslandWindowKeys.cs" />
+    <Compile Include="../../WinIsland/Island/QueueLayoutPolicy.cs" Link="QueueLayoutPolicy.cs" />
+    <Compile Include="../../WinIsland/Core/MonitorLayout.cs" Link="MonitorLayout.cs" />
+  </ItemGroup>
+</Project>

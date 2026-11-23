@@ -15,13 +15,14 @@ public sealed class SpotlightHost
     private SpotlightWindow? _window;
     private (string Owner, IslandSpotlight Content)? _current;
     private bool _islandOccluded;
+    private bool _islandClosed;
 
     public SpotlightHost(IslandWindow island, ISettingsStore settings, IPluginLogger log)
     {
         _island = island;
         _settings = settings;
         _log = log;
-        _island.Closed += (_, _) => CloseAll();
+        _island.Closed += (_, _) => { _islandClosed = true; CloseAll(); };
     }
 
     public string? CurrentOwner => _current?.Owner;
@@ -29,7 +30,7 @@ public sealed class SpotlightHost
     /// <summary>打开（或替换成）聚光卡：卡片先在主岛位置出现，随后岛体整块淡出。</summary>
     public void Show(string ownerId, IslandSpotlight spotlight)
     {
-        if (string.IsNullOrEmpty(ownerId) || spotlight?.Content is null) return;
+        if (_islandClosed || string.IsNullOrEmpty(ownerId) || spotlight?.Content is null) return;
 
         bool sameOwner = _current is { } existing && string.Equals(existing.Owner, ownerId, StringComparison.Ordinal);
         if (_current is { } previous && !sameOwner)
@@ -45,7 +46,7 @@ public sealed class SpotlightHost
         var originSize = _island.MainIslandSizeDip();
 
         _window ??= CreateWindow();
-        _window.ShowOverlay(origin, originSize, spotlight, _island.CurrentStyleKind, _island.IsMaterialApplied);
+        _window.ShowOverlay(origin, originSize, _island.MainIslandRadiusPixels, spotlight, _island.CurrentStyleKind, _island.IsMaterialApplied);
 
         if (!_islandOccluded)
         {
@@ -57,6 +58,14 @@ public sealed class SpotlightHost
     private SpotlightWindow CreateWindow()
     {
         var window = new SpotlightWindow(_settings, _log);
+        window.ReturnAnchor = _island.SpotlightReturnAnchor;
+        window.Returning += _island.PrepareSpotlightReturn;
+        window.Landing += () =>
+        {
+            if (_islandClosed || !_islandOccluded) return;
+            _islandOccluded = false;
+            _island.SetSpotlightOccluded(false, animate: false);
+        };
         window.Dismissed += OnDismissed;
         return window;
     }
@@ -79,7 +88,7 @@ public sealed class SpotlightHost
         if (_islandOccluded)
         {
             _islandOccluded = false;
-            _island.SetSpotlightOccluded(false);
+            if (!_islandClosed) _island.SetSpotlightOccluded(false);
         }
 
         if (_current is { } current)

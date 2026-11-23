@@ -24,6 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\Shared\PluginMotion.cs" Link="Shared\PluginMotion.cs" />
     <ProjectReference Include="..\..\WinIsland.Core\WinIsland.Core.csproj" Private="false" />
   </ItemGroup>
 

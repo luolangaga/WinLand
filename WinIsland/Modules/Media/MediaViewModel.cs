@@ -13,6 +13,7 @@ public sealed class MediaViewModel : INotifyPropertyChanged
     private string _sourceAppName = "";
     private bool _isPlaying;
     private bool _glowEnabled = true;
+    private bool _waveEnabled = true;
     private bool _lyricsEnabled = true;
     private ImageSource? _thumbnail;
     private ImageSource? _sourceAppIcon;
@@ -23,7 +24,14 @@ public sealed class MediaViewModel : INotifyPropertyChanged
     private int _sessionIndex;
     private int _sessionCount;
 
+    private string _backgroundMode = "spectrum";
+    private double _backgroundIntensity = 0.35;
+    public string BackgroundMode { get => _backgroundMode; set => SetField(ref _backgroundMode, value); }
+    public double BackgroundIntensity { get => _backgroundIntensity; set => SetField(ref _backgroundIntensity, value); }
+
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    public bool WaveEnabled { get => _waveEnabled; set => SetField(ref _waveEnabled, value); }
 
     public Action? TogglePlayPause { get; set; }
     public Action? SkipNext { get; set; }

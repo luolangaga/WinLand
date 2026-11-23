@@ -8,16 +8,18 @@ public sealed class ScopedSettings : ISettingsStore
     private readonly string _prefix;
     private readonly PluginScope _scope;
     private readonly Action<Action> _postToUI;
+    private readonly Action<Action> _guard;
     private readonly object _gate = new();
     private Action<string>? _changed;
     private bool _subscribed;
 
-    public ScopedSettings(SettingsService inner, string pluginId, PluginScope scope, Action<Action> postToUI)
+    public ScopedSettings(SettingsService inner, string pluginId, PluginScope scope, Action<Action> postToUI, Action<Action> guard)
     {
         _inner = inner;
         _prefix = pluginId + ".";
         _scope = scope;
         _postToUI = postToUI;
+        _guard = guard;
     }
 
     public event Action<string>? Changed
@@ -42,7 +44,8 @@ public sealed class ScopedSettings : ISettingsStore
 
     public T Get<T>(string key, T defaultValue) => _inner.Get(_prefix + key, defaultValue);
 
-    public void Set<T>(string key, T value) => _inner.Set(_prefix + key, value);
+    public void Set<T>(string key, T value)
+        => _scope.Execute(() => _inner.Set(_prefix + key, value));
 
     private void EnsureSubscribed()
     {
@@ -94,7 +97,11 @@ public sealed class ScopedSettings : ISettingsStore
                 return;
             }
 
-            handler(localKey);
+            foreach (Action<string> subscriber in handler.GetInvocationList())
+            {
+                if (_scope.IsRevoked) break;
+                _guard(() => subscriber(localKey));
+            }
         });
     }
 }

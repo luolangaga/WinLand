@@ -43,7 +43,11 @@ public sealed class HardwareSampler : IDisposable
         _log = log;
         _fps = new FpsMeter(log);
         _adapters = SystemMetrics.ActiveAdapters();
-        _gpuDevices.AddRange(SystemMetrics.GpuNames);
+        foreach (var adapter in GpuAdapters.Read())
+        {
+            _gpuDevices.Add(adapter.Name);
+            _gpuLuids.Add(adapter.Luid);
+        }
         _cpuDevices.Add("全部核心");
     }
 
@@ -118,23 +122,8 @@ public sealed class HardwareSampler : IDisposable
 
     private void RefreshGpuDevices()
     {
-        _gpuLuids.Clear();
-        foreach (var item in _pdh.Read(GpuCounter))
-        {
-            var luid = ParseLuid(item.Instance);
-            if (luid != 0 && !_gpuLuids.Contains(luid))
-            {
-                _gpuLuids.Add(luid);
-            }
-        }
-
-        if (_gpuDevices.Count == 0 && _gpuLuids.Count > 0)
-        {
-            for (var i = 0; i < _gpuLuids.Count; i++)
-            {
-                _gpuDevices.Add($"GPU {i + 1}");
-            }
-        }
+        // DXGI pairs every name with its LUID, including adapters with no active engine.
+        // Never align registry descriptions with PDH enumeration order.
     }
 
     private double ReadCpu()
@@ -182,14 +171,12 @@ public sealed class HardwareSampler : IDisposable
         try
         {
             var items = _pdh.Read(GpuCounter);
-            if (items.Count == 0) return (GpuLabel(), -1);
+            if (items.Count == 0) return (GpuLabel(), 0);
 
             var target = _gpuIndex >= 0 && _gpuIndex < _gpuLuids.Count ? _gpuLuids[_gpuIndex] : (long?)null;
-            var matched = target == null
-                ? items
-                : items.Where(i => ParseLuid(i.Instance) == target.Value).ToList();
-
-            if (matched.Count == 0) matched = items;
+            if (target == null) return (GpuLabel(), -1);
+            var matched = items.Where(i => ParseLuid(i.Instance) == target.Value).ToList();
+            if (matched.Count == 0) return (GpuLabel(), 0);
 
             var busiest = matched.MaxBy(i => i.Value);
             return (GpuLabel(), Math.Round(Math.Clamp(busiest.Value, 0, 100), 0));

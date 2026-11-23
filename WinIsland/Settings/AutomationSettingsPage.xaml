@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="WinIsland.Settings.AutomationSettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <StackPanel Spacing="8">
+        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="自动化" />
+        <TextBlock
+            Margin="0,0,0,12"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            Style="{StaticResource CaptionTextBlockStyle}"
+            Text="命令行、深层链接、全局快捷键，以及岛上的消息记录。" />
+
+        <TextBlock Style="{StaticResource SettingsSectionHeadingStyle}" Text="全局快捷键" />
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <StackPanel Spacing="12">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                        <TextBlock Text="启用全局快捷键" />
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="岛只响应鼠标；打开这一项才能用键盘唤起它。被其它程序占用的组合会静默跳过"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleSwitch
+                        x:Name="ToggleHotkeys"
+                        Grid.Column="1"
+                        MinWidth="0"
+                        VerticalAlignment="Center"
+                        AutomationProperties.AutomationId="ToggleHotkeys"
+                        AutomationProperties.Name="启用全局快捷键"
+                        OffContent=""
+                        OnContent=""
+                        Toggled="ToggleHotkeys_Toggled" />
+                </Grid>
+
+                <StackPanel Spacing="6">
+                    <TextBlock Text="展开 / 收起灵动岛" />
+                    <TextBox
+                        x:Name="ToggleBox"
+                        AutomationProperties.AutomationId="HotkeyToggleBox"
+                        AutomationProperties.Name="展开收起快捷键"
+                        PlaceholderText="Ctrl+Alt+I"
+                        TextChanged="HotkeyBox_TextChanged" />
+                </StackPanel>
+
+                <StackPanel Spacing="6">
+                    <TextBlock Text="播放 / 暂停当前媒体" />
+                    <TextBox
+                        x:Name="PlayPauseBox"
+                        AutomationProperties.AutomationId="HotkeyPlayPauseBox"
+                        AutomationProperties.Name="播放暂停快捷键"
+                        PlaceholderText="Ctrl+Alt+P"
+                        TextChanged="HotkeyBox_TextChanged" />
+                </StackPanel>
+
+                <StackPanel Spacing="6">
+                    <TextBlock Text="切换勿扰（静默 30 分钟）" />
+                    <TextBox
+                        x:Name="QuietBox"
+                        AutomationProperties.AutomationId="HotkeyQuietBox"
+                        AutomationProperties.Name="勿扰快捷键"
+                        PlaceholderText="留空表示不启用"
+                        TextChanged="HotkeyBox_TextChanged" />
+                </StackPanel>
+
+                <TextBlock
+                    x:Name="HotkeyHint"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="格式：Ctrl / Alt / Shift / Win 加一个主键（字母、数字或 F1..F24），用 + 连接"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
+        <TextBlock Style="{StaticResource SettingsSectionHeadingStyle}" Text="命令行与链接" />
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <StackPanel Spacing="8">
+                <TextBlock Text="从脚本、CI 或其它程序推消息" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="程序只允许开一个实例：已经在运行时，新进程会把参数交给它，然后自己退出。因此下面这些命令随时可以用。"
+                    TextWrapping="Wrap" />
+                <TextBlock
+                    FontFamily="Cascadia Mono, Consolas"
+                    FontSize="12"
+                    IsTextSelectionEnabled="True"
+                    Text="WinIsland.exe --notify &quot;构建完成&quot; &quot;耗时 1m20s&quot;&#x0a;WinIsland.exe --notify &quot;下载完成&quot; --glyph E896 --accent #22C55E --duration 6&#x0a;WinIsland.exe --settings plugins&#x0a;WinIsland.exe --quiet 30&#x0a;WinIsland.exe --unquiet"
+                    TextWrapping="Wrap" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="还可以用 winisland://notify?title=构建完成&amp;text=耗时1m20s；需要先登记协议。"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <StackPanel Spacing="8">
+                <TextBlock Text="winisland:// 协议" />
+                <TextBlock
+                    x:Name="ProtocolStatus"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    TextWrapping="Wrap" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="登记写在当前用户下（HKCU），不需要管理员权限，随时可以取消。"
+                    TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button
+                        AutomationProperties.AutomationId="RegisterProtocolButton"
+                        Click="RegisterProtocol_Click"
+                        Content="登记协议" />
+                    <Button
+                        AutomationProperties.AutomationId="UnregisterProtocolButton"
+                        Click="UnregisterProtocol_Click"
+                        Content="取消登记" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <TextBlock Style="{StaticResource SettingsSectionHeadingStyle}" Text="消息历史" />
+
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <StackPanel Spacing="8">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                        <TextBlock Text="岛上的消息记录" />
+                        <TextBlock
+                            x:Name="HistoryCount"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        AutomationProperties.AutomationId="ClearHistoryButton"
+                        Click="ClearHistory_Click"
+                        Content="清空" />
+                </Grid>
+
+                <TextBlock
+                    x:Name="HistoryEmpty"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="岛上的临时消息 4 秒就消失，这里保留最近的消息原文，方便回头查。" />
+
+                <ListView
+                    x:Name="HistoryList"
+                    MaxHeight="320"
+                    AutomationProperties.AutomationId="HistoryList"
+                    SelectionMode="None">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Padding="0,6" Spacing="2">
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock
+                                        FontSize="13"
+                                        FontWeight="SemiBold"
+                                        Text="{Binding Title}"
+                                        TextTrimming="CharacterEllipsis" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{Binding Time}" />
+                                </Grid>
+                                <TextBlock
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{Binding Text}"
+                                    TextWrapping="Wrap"
+                                    Visibility="{Binding TextVisibility}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </StackPanel>
+        </Border>
+
+        <Border
+            x:Name="SafeModePanel"
+            Style="{StaticResource SettingsCardStyle}"
+            Visibility="Collapsed">
+            <StackPanel Spacing="8">
+                <TextBlock Text="安全模式" FontWeight="SemiBold" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="上一次连续多次启动没有正常完成，这一次只加载了内置插件。确认外部插件没问题之后可以退出安全模式。"
+                    TextWrapping="Wrap" />
+                <Button
+                    AutomationProperties.AutomationId="LeaveSafeModeButton"
+                    Click="LeaveSafeMode_Click"
+                    Content="退出安全模式" />
+                <TextBlock
+                    x:Name="SafeModeResult"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Visibility="Collapsed" />
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</UserControl>

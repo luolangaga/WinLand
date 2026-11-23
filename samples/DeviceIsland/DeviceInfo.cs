@@ -50,6 +50,10 @@ internal sealed class DeviceInfo
     /// </summary>
     public int? BatteryPercent { get; init; }
 
+    internal bool HasSamePresentation(DeviceInfo other) =>
+        Id == other.Id && Kind == other.Kind && Name == other.Name && Detail == other.Detail && Glyph == other.Glyph &&
+        CanEject == other.CanEject && Target == other.Target && PnpInstanceId == other.PnpInstanceId && BatteryPercent == other.BatteryPercent;
+
     /// <summary>换一份电量（其它字段原样保留）。读不到时传 null，等于把旧的读数清掉。</summary>
     internal DeviceInfo WithBattery(int? percent) => new()
     {

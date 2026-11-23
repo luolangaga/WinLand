@@ -29,6 +29,11 @@ public sealed partial class SettingsPageHost : Page
     {
         base.OnNavigatedTo(e);
         ContentColumn.Children.Clear();
+        // 列表页自己滚动，宿主提供有限视口以保留 ListView 虚拟化。
+        bool ownsScroll = e.Parameter is PluginCenterPage;
+        Scroller.VerticalContentAlignment = ownsScroll ? VerticalAlignment.Stretch : VerticalAlignment.Top;
+        Scroller.VerticalScrollMode = ownsScroll ? ScrollMode.Disabled : ScrollMode.Auto;
+        Scroller.VerticalScrollBarVisibility = ownsScroll ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
         if (e.Parameter is UIElement page) ContentColumn.Children.Add(page);
     }
 

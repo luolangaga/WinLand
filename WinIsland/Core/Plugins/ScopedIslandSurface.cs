@@ -9,6 +9,9 @@ public sealed class ScopedIslandSurface : IIslandSurface
     private readonly IslandService _island;
     private readonly PluginScope _scope;
     private readonly HashSet<string> _dropTargetIds = new(StringComparer.Ordinal);
+    // 这个插件挂过的实例 id（含 null 那条单实例内容）：停用时逐条撤回。
+    // 必须逐条撤：SetLive(instance, null) 只清一条，换不出"全部清掉"的语义。
+    private readonly HashSet<string?> _contentInstances = new(StringComparer.Ordinal);
     private bool _contentRevokerRegistered;
     private bool _temporaryRevokerRegistered;
     private bool _spotlightRevokerRegistered;
@@ -21,30 +24,53 @@ public sealed class ScopedIslandSurface : IIslandSurface
     }
 
     public void SetContent(IslandLiveContent? content)
+        => _owner.RunScoped(_scope, "SetContent", () => SetContentCore(null, content));
+
+    public void SetContent(string instanceId, IslandLiveContent? content)
+        => _owner.RunScoped(_scope, "SetContent", () => SetContentCore(instanceId, content));
+
+    public void RemoveContent(string instanceId)
+        => _owner.RunScoped(_scope, "RemoveContent", () => SetContentCore(instanceId, null));
+
+    private void SetContentCore(string? instanceId, IslandLiveContent? content)
     {
-        if (!_owner.TryEnter("SetContent"))
+        if (!_owner.TryEnter(_scope, "SetContent"))
         {
             return;
         }
 
         if (content == null)
         {
-            _island.SetLiveContent(_owner.Info.Id, null);
+            _island.SetLiveContent(_owner.Info.Id, instanceId, null);
+            _contentInstances.Remove(instanceId);
             return;
         }
+
+        _contentInstances.Add(instanceId);
 
         if (!_contentRevokerRegistered)
         {
             _contentRevokerRegistered = true;
-            _scope.Register(new ActionDisposable(() => _island.SetLiveContent(_owner.Info.Id, null)));
+            _scope.Register(new ActionDisposable(() =>
+            {
+                // 停用/卸载：这个插件挂过的每一条内容都撤掉（包括它后来再也没更新过的那些实例）
+                foreach (var id in _contentInstances.ToArray())
+                {
+                    _island.SetLiveContent(_owner.Info.Id, id, null);
+                }
+                _contentInstances.Clear();
+            }));
         }
 
-        _island.SetLiveContent(_owner.Info.Id, Guard(content));
+        _island.SetLiveContent(_owner.Info.Id, instanceId, Guard(content));
     }
 
     public void ShowMessage(IslandMessage message)
+        => _owner.RunScoped(_scope, "ShowMessage", () => ShowMessageCore(message));
+
+    private void ShowMessageCore(IslandMessage message)
     {
-        if (!_owner.TryEnter("ShowMessage"))
+        if (!_owner.TryEnter(_scope, "ShowMessage"))
         {
             return;
         }
@@ -54,8 +80,11 @@ public sealed class ScopedIslandSurface : IIslandSurface
     }
 
     public void Show(UIElement content, Windows.Foundation.Size size, TimeSpan? duration = null)
+        => _owner.RunScoped(_scope, "Show", () => ShowCore(content, size, duration));
+
+    private void ShowCore(UIElement content, Windows.Foundation.Size size, TimeSpan? duration = null)
     {
-        if (!_owner.TryEnter("Show"))
+        if (!_owner.TryEnter(_scope, "Show"))
         {
             return;
         }
@@ -65,8 +94,11 @@ public sealed class ScopedIslandSurface : IIslandSurface
     }
 
     public void DismissTemporary()
+        => _owner.RunScoped(_scope, "DismissTemporary", () => DismissTemporaryCore());
+
+    private void DismissTemporaryCore()
     {
-        if (!_owner.TryEnter("DismissTemporary"))
+        if (!_owner.TryEnter(_scope, "DismissTemporary"))
         {
             return;
         }
@@ -75,8 +107,11 @@ public sealed class ScopedIslandSurface : IIslandSurface
     }
 
     public void AddSettingsPage(SettingsPageDescriptor page)
+        => _owner.RunScoped(_scope, "AddSettingsPage", () => AddSettingsPageCore(page));
+
+    private void AddSettingsPageCore(SettingsPageDescriptor page)
     {
-        if (!_owner.TryEnter("AddSettingsPage"))
+        if (!_owner.TryEnter(_scope, "AddSettingsPage"))
         {
             return;
         }
@@ -86,7 +121,8 @@ public sealed class ScopedIslandSurface : IIslandSurface
             scopedId,
             page.Title,
             page.Glyph,
-            () => _owner.GuardPageFactory(page),
+            () => _owner.TryEnter(_scope, "设置页工厂")
+                ? _owner.GuardPageFactory(page) : new Microsoft.UI.Xaml.Controls.TextBlock { Text = "插件已停用。" },
             page.Order);
 
         _island.AddSettingsPage(descriptor);
@@ -94,8 +130,11 @@ public sealed class ScopedIslandSurface : IIslandSurface
     }
 
     public void RemoveSettingsPage(string pageId)
+        => _owner.RunScoped(_scope, "RemoveSettingsPage", () => RemoveSettingsPageCore(pageId));
+
+    private void RemoveSettingsPageCore(string pageId)
     {
-        if (!_owner.TryEnter("RemoveSettingsPage"))
+        if (!_owner.TryEnter(_scope, "RemoveSettingsPage"))
         {
             return;
         }
@@ -104,8 +143,11 @@ public sealed class ScopedIslandSurface : IIslandSurface
     }
 
     public void AddDropTarget(IslandDropTarget target)
+        => _owner.RunScoped(_scope, "AddDropTarget", () => AddDropTargetCore(target));
+
+    private void AddDropTargetCore(IslandDropTarget target)
     {
-        if (!_owner.TryEnter("AddDropTarget"))
+        if (!_owner.TryEnter(_scope, "AddDropTarget"))
         {
             return;
         }
@@ -126,8 +168,11 @@ public sealed class ScopedIslandSurface : IIslandSurface
     }
 
     public void RemoveDropTarget(string targetId)
+        => _owner.RunScoped(_scope, "RemoveDropTarget", () => RemoveDropTargetCore(targetId));
+
+    private void RemoveDropTargetCore(string targetId)
     {
-        if (!_owner.TryEnter("RemoveDropTarget") || string.IsNullOrWhiteSpace(targetId))
+        if (!_owner.TryEnter(_scope, "RemoveDropTarget") || string.IsNullOrWhiteSpace(targetId))
         {
             return;
         }
@@ -137,8 +182,11 @@ public sealed class ScopedIslandSurface : IIslandSurface
     }
 
     public void OpenSpotlight(IslandSpotlight spotlight)
+        => _owner.RunScoped(_scope, "OpenSpotlight", () => OpenSpotlightCore(spotlight));
+
+    private void OpenSpotlightCore(IslandSpotlight spotlight)
     {
-        if (!_owner.TryEnter("OpenSpotlight"))
+        if (!_owner.TryEnter(_scope, "OpenSpotlight"))
         {
             return;
         }
@@ -165,8 +213,11 @@ public sealed class ScopedIslandSurface : IIslandSurface
     }
 
     public void CloseSpotlight()
+        => _owner.RunScoped(_scope, "CloseSpotlight", () => CloseSpotlightCore());
+
+    private void CloseSpotlightCore()
     {
-        if (!_owner.TryEnter("CloseSpotlight"))
+        if (!_owner.TryEnter(_scope, "CloseSpotlight"))
         {
             return;
         }
@@ -193,7 +244,7 @@ public sealed class ScopedIslandSurface : IIslandSurface
     /// </summary>
     private IslandLiveContent Guard(IslandLiveContent content) => content with
     {
-        OnTap = content.OnTap == null ? null : () => _owner.InvokeGuarded("点击回调", content.OnTap),
+        OnTap = content.OnTap == null ? null : () => _owner.RunScoped(_scope, "点击回调", content.OnTap),
     };
 
     /// <summary>
@@ -206,6 +257,6 @@ public sealed class ScopedIslandSurface : IIslandSurface
     private IslandDropTarget Guard(IslandDropTarget target) => target with
     {
         Extensions = target.Extensions?.ToArray(),
-        Handler = ctx => _owner.InvokeGuardedAsync("投放回调", () => target.Handler(ctx)),
+        Handler = ctx => _owner.InvokeScopedAsync(_scope, "投放回调", () => target.Handler(ctx)),
     };
 }

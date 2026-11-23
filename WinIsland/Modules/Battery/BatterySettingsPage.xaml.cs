@@ -15,6 +15,7 @@ public sealed partial class BatterySettingsPage : UserControl
         _settings = context.Settings;
         _plugin = plugin;
         InitializeComponent();
+        BackgroundOptions.Children.Add(new WinIsland.Settings.BackgroundEffectSettings(_settings, true, charging: true));
 
         EnableToggle.IsOn = _settings.Get("enabled", true);
         StatusText.Text = _plugin.StatusText;

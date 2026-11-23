@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using WinIsland.Core;
+using WinIsland.PluginViews;
 
 namespace ClipboardIsland;
 
@@ -131,6 +132,7 @@ internal sealed class ClipRow : UserControl
             Height = leadingSize,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        leading.Children.Add(new Border { Background = _neutralFill, CornerRadius = new CornerRadius(6) });
         leading.Children.Add(glyph);
 
         if (item.IsImage && item.ImagePath is not null)
@@ -178,19 +180,23 @@ internal sealed class ClipRow : UserControl
         Grid.SetColumn(time, 2);
         grid.Children.Add(time);
 
+        var highlight = new Border { Background = _hoverBrush, CornerRadius = new CornerRadius(8), IsHitTestVisible = false };
+        Motion.Visual(highlight).Opacity = 0;
+        var layers = new Grid();
+        layers.Children.Add(highlight);
+        layers.Children.Add(new Border { Padding = padding, Child = grid });
         _frame = new Border
         {
             CornerRadius = new CornerRadius(6),
-            Padding = padding,
             // 命中测试需要非 null 的画刷（全透明也行），否则 Tapped 不会触发
             Background = interactive ? TransparentBrush : null,
-            Child = grid,
+            Child = layers,
         };
 
         if (interactive)
         {
-            _frame.PointerEntered += (_, _) => _frame.Background = _hoverBrush;
-            _frame.PointerExited += (_, _) => _frame.Background = TransparentBrush;
+            _frame.PointerEntered += (_, _) => Motion.Scalar(Motion.Visual(highlight), "Opacity", 1, 140);
+            _frame.PointerExited += (_, _) => Motion.Scalar(Motion.Visual(highlight), "Opacity", 0, 160);
             _frame.Tapped += (_, e) =>
             {
                 // 必须吃掉事件：宿主只看得到 ButtonBase/Slider 这类控件，
@@ -390,7 +396,7 @@ internal sealed class ClipRow : UserControl
         _animateTo = target;
         _deleteAfterAnimation = deleteAfter;
         _animateStart = DateTimeOffset.UtcNow;
-        _animateDuration = TimeSpan.FromMilliseconds(milliseconds);
+        _animateDuration = Motion.Duration(milliseconds);
 
         if (_timer is null)
         {
@@ -479,7 +485,8 @@ internal sealed class ClipRow : UserControl
             target.Source = image;
             target.Opacity = 1;
             frame.Opacity = 1;
-            glyph.Opacity = 0;
+            Motion.Reveal(frame, 180, 0);
+            Motion.Scalar(Motion.Visual(glyph), "Opacity", 0, 180);
         }
         catch
         {

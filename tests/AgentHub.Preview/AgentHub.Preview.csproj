@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion><RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI><WinUISDKReferences>false</WinUISDKReferences><WindowsPackageType>None</WindowsPackageType>
+    <EnableMsixTooling>false</EnableMsixTooling><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <ApplicationManifest>../../WinIsland/app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../WinIsland.Core/WinIsland.Core.csproj" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2526" />
+    <Compile Include="../../samples/AgentHub/Core/*.cs" Link="Core/%(Filename)%(Extension)" />
+    <Compile Include="../../samples/AgentHub/HubView.cs" Link="HubView.cs" />
+    <Compile Include="../../samples/AgentHub/HubDashboard.cs" Link="HubDashboard.cs" />
+    <Compile Include="../../samples/AgentHub/HubPalette.cs" Link="HubPalette.cs" />
+    <Compile Include="../../samples/AgentHub/HubCharts.cs" Link="HubCharts.cs" />
+    <Compile Include="../../samples/AgentHub/HubRequest.cs" Link="HubRequest.cs" />
+  </ItemGroup>
+</Project>

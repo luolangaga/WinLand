@@ -28,9 +28,9 @@ public sealed partial class SpotlightWindow : Window
     private const int HintDelayMs = 200;
     private const int HintFadeMs = 220;
     /// <summary>飞入倾角：绕 (0.18, 1, 0) 轴，带 Y 轴分量所以是真的 3D 倾斜而不是纯平面旋转。</summary>
-    private const double EnterTilt = -9;
+    private const double EnterTilt = -2.5;
     /// <summary>收回倾角：与飞入反号，像卡片转回原来那一面。</summary>
-    private const double ExitTilt = 8;
+    private const double ExitTilt = 0;
     private const double MinCardWidth = 240;
     private const double MinCardHeight = 180;
     /// <summary>卡片尺寸占工作区的上限（插件声明的尺寸会被夹到这个范围内）。</summary>
@@ -50,11 +50,12 @@ public sealed partial class SpotlightWindow : Window
     private bool _closing;
     /// <summary>点遮罩可以收起：开场动画跑完之前一律为 false（此时卡片布局框与视觉位置还不一致）。</summary>
     private bool _armed;
-    private bool _pendingClose;
     private bool _hotKeyInstalled;
     /// <summary>输入会话（卡片内容里的文本框获得焦点时临时解除 NOACTIVATE）：见 <see cref="InputSession"/>。</summary>
     private readonly InputSession _input;
-    private PendingShow? _pendingShow;
+    private int _motionVersion;
+    private bool _disposed;
+    private bool _pendingShow;
 
     // 外观（与岛体同一套规则）：圆角、底衬、描边、明暗主题全都来自 IslandStyle，
     // 主题变化时就地重刷（见 OnSystemThemeChanged），所以卡片在屏幕上开着也会跟着换色
@@ -67,6 +68,9 @@ public sealed partial class SpotlightWindow : Window
     private RectInt32 _workArea;
     private Win32.RECT _origin;
     private Size _originSizeDip;
+    private double _originRadiusPixels;
+    private readonly CompositionRoundedRectangleGeometry _cardGeometry;
+    private readonly CompositionPropertySet _shape;
     private Size _contentSize;
     private double _scale = 1;
     /// <summary>本次展示是"同一个会话内的替换"（遮罩已经在场，不重放淡入）。</summary>
@@ -81,14 +85,43 @@ public sealed partial class SpotlightWindow : Window
     /// <summary>收起动画结束（窗口已隐藏、内容已卸下）后触发。</summary>
     internal event Action? Dismissed;
 
-    private readonly record struct PendingShow(
-        Win32.RECT Origin, Size OriginSize, IslandSpotlight Content, IslandStyleKind Style, bool Material);
+    internal event Action? Returning;
+    internal event Action? Landing;
+
+    internal Func<(Win32.RECT Rect, Size Size, double RadiusPixels)>? ReturnAnchor { get; set; }
 
     public SpotlightWindow(ISettingsStore settings, IPluginLogger log)
     {
         _settings = settings;
         _log = log;
         InitializeComponent();
+        ElementCompositionPreview.SetIsTranslationEnabled(Card, true);
+        var pose = Motion.Visual(Card);
+        pose.Properties.InsertVector3("Translation", Vector3.Zero);
+        _shape = pose.Compositor.CreatePropertySet();
+        _shape.InsertScalar("Width", 1);
+        _shape.InsertScalar("Height", 1);
+        _shape.InsertScalar("Radius", 28);
+        _shape.InsertScalar("OriginRadius", 20);
+        _shape.InsertScalar("StartScaleY", 0.1f);
+        _cardGeometry = pose.Compositor.CreateRoundedRectangleGeometry();
+        pose.Clip = pose.Compositor.CreateGeometricClip(_cardGeometry);
+        using var sizeExpression = pose.Compositor.CreateExpressionAnimation("Vector2(shape.Width, shape.Height)");
+        sizeExpression.SetReferenceParameter("shape", _shape);
+        _cardGeometry.StartAnimation("Size", sizeExpression);
+        // The screen-space radius must survive non-uniform Scale. The same live pose drives both axes.
+        const string radius = "Min(Lerp(shape.Radius, shape.OriginRadius, Clamp((1 - pose.Scale.Y) / Max(0.001, 1 - shape.StartScaleY), 0, 1)), Min(shape.Width * pose.Scale.X, shape.Height * pose.Scale.Y) / 2)";
+        using var cornerExpression = pose.Compositor.CreateExpressionAnimation(
+            $"Vector2({radius} / Max(0.001, pose.Scale.X), {radius} / Max(0.001, pose.Scale.Y))");
+        cornerExpression.SetReferenceParameter("shape", _shape);
+        cornerExpression.SetReferenceParameter("pose", pose);
+        _cardGeometry.StartAnimation("CornerRadius", cornerExpression);
+        ElementCompositionPreview.SetIsTranslationEnabled(SpotlightHost, true);
+        Motion.Visual(SpotlightHost).Properties.InsertVector3("Translation", Vector3.Zero);
+        // Hide before first Show: the first loaded frame must not flash at the destination.
+        Motion.Visual(Card).Opacity = 0;
+        Motion.Visual(Scrim).Opacity = 0;
+        Motion.Visual(Hint).Opacity = 0;
 
         AppWindow.IsShownInSwitchers = false;
         _presenter = OverlappedPresenter.Create();
@@ -122,6 +155,8 @@ public sealed partial class SpotlightWindow : Window
         _settings.Changed += OnSettingChanged;
         Closed += (_, _) =>
         {
+            _disposed = true;
+            ++_motionVersion;
             SystemTheme.Changed -= OnSystemThemeChanged;
             _settings.Changed -= OnSettingChanged;
             _input.Dispose();
@@ -167,7 +202,9 @@ public sealed partial class SpotlightWindow : Window
         RootCanvas.RequestedTheme = IslandStyle.IsLightChrome(_style, _light) ? ElementTheme.Light : ElementTheme.Dark;
         Card.Background = IslandStyle.CreateSpotlightFill(_style, _materialApplied, _light, opacity);
         Card.BorderBrush = IslandStyle.CreateSpotlightStroke(_style, _light, opacity);
-        Card.CornerRadius = new CornerRadius(IslandStyle.ResolveSpotlightRadius(_style, radiusScale));
+        double radius = IslandStyle.ResolveSpotlightRadius(_style, radiusScale);
+        Card.CornerRadius = new CornerRadius(radius);
+        _shape.InsertScalar("Radius", (float)radius);
         SpotlightHost.Opacity = opacity;
     }
 
@@ -203,31 +240,56 @@ public sealed partial class SpotlightWindow : Window
 
     /// <summary>
     /// 展示聚光卡：窗口铺满主岛所在显示器，卡片按工作区居中，从主岛矩形飞入。
-    /// 关闭动画进行中到来的请求会排队，等收完再开。
+    /// 替换和反向请求从合成器当前姿态续接，不排队。
     /// </summary>
-    internal void ShowOverlay(Win32.RECT origin, Size originSizeDip, IslandSpotlight content,
+    internal void ShowOverlay(Win32.RECT origin, Size originSizeDip, double originRadiusPixels, IslandSpotlight content,
         IslandStyleKind style, bool materialApplied)
     {
-        if (_closing)
+        if (_disposed) return;
+        bool replacing = _shown;
+        _closing = false;
+        _input.End();
+        // FLIP: record the previous layout, then preserve its rendered pose with StartingValue.
+        double oldW = Card.Width;
+        double oldH = Card.Height;
+        var oldCenter = _layoutOffset + new Vector3((float)(oldW / 2), (float)(oldH / 2), 0);
+
+        bool changingContent = !ReferenceEquals(SpotlightHost.Content, content.Content);
+        SpotlightLeaving.Content = null;
+        if (replacing && changingContent)
         {
-            _pendingShow = new PendingShow(origin, originSizeDip, content, style, materialApplied);
-            return;
+            var outgoing = SpotlightHost.Content;
+            SpotlightHost.Content = null;
+            SpotlightLeaving.Width = oldW;
+            SpotlightLeaving.Height = oldH;
+            SpotlightLeaving.Content = outgoing;
+            if (outgoing is UIElement oldView) Motion.Scalar(Motion.Visual(oldView), "Opacity", 0, 120);
         }
 
         _origin = origin;
         _originSizeDip = originSizeDip;
+        _originRadiusPixels = originRadiusPixels;
         _contentSize = content.Size;
         _sessionActive = _shown;
 
         var display = ResolveDisplay(origin, out var outer);
         _outerBounds = outer;
-        _workArea = display.WorkArea;
+        _workArea = new RectInt32(display.WorkX, display.WorkY, display.WorkWidth, display.WorkHeight);
 
         _style = style;
         _materialApplied = materialApplied;
         _light = SystemTheme.IsLight;
         ApplyChrome();
         SpotlightHost.Content = content.Content;
+        if (replacing && changingContent) Motion.Reveal(content.Content, 220, 8);
+        else if (!replacing)
+        {
+            var contentVisual = Motion.Visual(content.Content);
+            contentVisual.StopAnimation("Opacity");
+            contentVisual.Opacity = 1;
+            ElementCompositionPreview.SetIsTranslationEnabled(content.Content, true);
+            contentVisual.Properties.InsertVector3("Translation", Vector3.Zero);
+        }
 
         _presenter.IsAlwaysOnTop = false;
         _presenter.IsAlwaysOnTop = true;
@@ -239,62 +301,108 @@ public sealed partial class SpotlightWindow : Window
 
         if (RootCanvas.XamlRoot == null)
         {
-            // 首次显示时 XamlRoot 要等内容加载完成才对得上；此刻整窗都是 0 透明度，延后一拍无感
-            DispatcherQueue.TryEnqueue(BeginShow);
+            ApplyLayout();
+            UpdateOriginTransform();
+            ApplyStartTransform();
+            _shown = true;
+            _pendingShow = true;
+            int pendingVersion = ++_motionVersion;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (pendingVersion != _motionVersion || !_shown || _closing || _disposed) return;
+                _pendingShow = false;
+                BeginShow();
+            });
             return;
         }
 
-        BeginShow();
+        if (replacing)
+        {
+            ApplyLayout();
+            UpdateOriginTransform();
+            var visual = Motion.Visual(Card);
+            visual.CenterPoint = new Vector3((float)Card.Width / 2, (float)Card.Height / 2, 0);
+            var newCenter = _layoutOffset + visual.CenterPoint;
+            Motion.Vector(visual, "Translation", Vector3.Zero, 280,
+                "this.StartingValue + adjustment", oldCenter - newCenter);
+            Motion.Vector(visual, "Scale", Vector3.One, 280,
+                "this.StartingValue * adjustment", new Vector3((float)(oldW / Card.Width), (float)(oldH / Card.Height), 1));
+            StartEnterAnimation(replacing: true);
+        }
+        else BeginShow();
     }
 
-    /// <summary>收起聚光卡：反向动画 → 隐藏窗口 → 卸下内容。开场动画未完成时排队。</summary>
+    /// <summary>收起聚光卡：从当前姿态反向动画 → 隐藏窗口 → 卸下内容。</summary>
     internal void CloseOverlay()
     {
         if (!_shown || _closing) return;
-        if (_opening)
+        if (_pendingShow)
         {
-            _pendingClose = true;
+            _pendingShow = false;
+            ++_motionVersion;
+            _closing = true;
+            Returning?.Invoke();
+            FinishClose();
             return;
         }
-
+        if (ReturnAnchor?.Invoke() is { } anchor)
+        {
+            _origin = anchor.Rect;
+            _originSizeDip = anchor.Size;
+            _originRadiusPixels = anchor.RadiusPixels;
+            UpdateOriginTransform();
+        }
+        Returning?.Invoke();
+        int version = ++_motionVersion;
+        _opening = false;
         _closing = true;
         _armed = false;
         Scrim.IsHitTestVisible = false;
 
         var visual = ElementCompositionPreview.GetElementVisual(Card);
         var compositor = visual.Compositor;
-        var ease = compositor.CreateCubicBezierEasingFunction(new Vector2(0.4f, 0f), new Vector2(0.55f, 1f));
+        var ease = Motion.Ease(compositor);
 
         var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
 
-        AnimateVector(visual, "Offset", compositor, _originOffset, FlyOutMs, ease);
+        Motion.Vector(visual, "Translation", _originOffset, FlyOutMs);
         AnimateVector(visual, "Scale", compositor, new Vector3(_startScaleX, _startScaleY, 1f), FlyOutMs, ease);
         AnimateScalar(visual, "RotationAngleInDegrees", compositor, (float)ExitTilt, FlyOutMs, ease);
 
-        // 前 65% 保持不透明（让人看清"卡片在缩小飞回去"），最后一段淡出，落在岛体上时正好消失
-        var fade = compositor.CreateScalarKeyFrameAnimation();
-        fade.Duration = TimeSpan.FromMilliseconds(FlyOutMs);
-        fade.InsertKeyFrame(0.65f, 1f, ease);
-        fade.InsertKeyFrame(1f, 0f, ease);
-        visual.StartAnimation("Opacity", fade);
+        // Keep the body painted all the way to the landing. Fade the enlarged content only.
+        // The main HWND replaces this exact rounded silhouette before this overlay is hidden.
+        AnimateScalar(visual, "Opacity", compositor, 1f, FlyOutMs, ease);
+        using var contentFade = compositor.CreateScalarKeyFrameAnimation();
+        contentFade.Duration = Motion.Duration(FlyOutMs);
+        contentFade.InsertExpressionKeyFrame(0, "this.StartingValue");
+        contentFade.InsertExpressionKeyFrame(0.5f, "this.StartingValue");
+        contentFade.InsertKeyFrame(1, 0, ease);
+        Motion.Visual(SpotlightHost).StartAnimation("Opacity", contentFade);
 
         AnimateScalar(ElementCompositionPreview.GetElementVisual(Scrim), "Opacity", compositor, 0f, ScrimFadeOutMs, ease);
         AnimateScalar(ElementCompositionPreview.GetElementVisual(Hint), "Opacity", compositor, 0f, HintFadeMs, ease);
 
+        batch.Completed += (_, _) =>
+        {
+            batch.Dispose();
+            if (version != _motionVersion || _disposed) return;
+            FinishClose();
+        };
         batch.End();
-        batch.Completed += (_, _) => FinishClose();
     }
 
     /// <summary>不等动画立刻收场（应用退出/岛窗口关闭路径）。</summary>
     internal void ForceClose()
     {
-        if (!_shown || _closing) return;
-        FinishClose();
+        ++_motionVersion;
+        _closing = true;
+        if (_shown) FinishClose();
     }
 
     private void BeginShow()
     {
         ApplyLayout();
+        UpdateOriginTransform();
         ApplyStartTransform();
         _log.Debug(
             $"聚光卡入场：窗口 {_outerBounds.X},{_outerBounds.Y} {_outerBounds.Width}x{_outerBounds.Height}，" +
@@ -328,6 +436,8 @@ public sealed partial class SpotlightWindow : Window
 
         Card.Width = cardW;
         Card.Height = cardH;
+        _shape.InsertScalar("Width", (float)cardW);
+        _shape.InsertScalar("Height", (float)cardH);
 
         double cardLeft = (_workArea.X - _outerBounds.X) / _scale + (workW - cardW) / 2;
         double cardTop = (_workArea.Y - _outerBounds.Y) / _scale + (workH - cardH) / 2;
@@ -345,53 +455,46 @@ public sealed partial class SpotlightWindow : Window
         Canvas.SetLeft(Hint, hintLeft);
         Canvas.SetTop(Hint, Math.Min(hintTop, (_workArea.Y - _outerBounds.Y) / _scale + workH - hintSize.Height - 4));
 
-        RootCanvas.UpdateLayout();
+        // Canvas coordinates are sufficient; do not force a synchronous layout of plugin content.
     }
 
     /// <summary>把卡片摆成"主岛的样子"：同中心、同尺寸比例、带倾角、透明。</summary>
-    private void ApplyStartTransform()
+    private void UpdateOriginTransform()
     {
-        var visual = ElementCompositionPreview.GetElementVisual(Card);
-        double cardW = Card.ActualWidth > 0 ? Card.ActualWidth : Card.Width;
-        double cardH = Card.ActualHeight > 0 ? Card.ActualHeight : Card.Height;
-        double cardLeft = Canvas.GetLeft(Card);
-        double cardTop = Canvas.GetTop(Card);
-
-        visual.CenterPoint = new Vector3((float)(cardW / 2), (float)(cardH / 2), 0);
-
-        double originW = _originSizeDip.Width > 0 ? _originSizeDip.Width : (_origin.Right - _origin.Left) / _scale;
-        double originH = _originSizeDip.Height > 0 ? _originSizeDip.Height : (_origin.Bottom - _origin.Top) / _scale;
-        _startScaleX = (float)Math.Clamp(originW / cardW, 0.18, 1.0);
-        _startScaleY = (float)Math.Clamp(originH / cardH, 0.10, 1.0);
-
-        double originCenterX = (_origin.Left - _outerBounds.X) / _scale + originW / 2;
-        double originCenterY = (_origin.Top - _outerBounds.Y) / _scale + originH / 2;
-        _originOffset = _layoutOffset + new Vector3(
-            (float)(originCenterX - (cardLeft + cardW / 2)),
-            (float)(originCenterY - (cardTop + cardH / 2)),
-            0);
-
-        visual.Offset = _originOffset;
-        visual.Scale = new Vector3(_startScaleX, _startScaleY, 1f);
-        visual.RotationAxis = Vector3.Normalize(new Vector3(0.18f, 1f, 0f));
-        visual.RotationAngleInDegrees = (float)EnterTilt;
-        visual.Opacity = 0f;
-
-        // 同会话内的替换：遮罩与提示已经在场，保持原样，只让新卡片重新飞一次
-        if (!_sessionActive)
-        {
-            ElementCompositionPreview.GetElementVisual(Scrim).Opacity = 0f;
-            ElementCompositionPreview.GetElementVisual(Hint).Opacity = 0f;
-        }
+        // Physical origin rect already includes the user's island scale. Use target monitor DPI.
+        double originW = Math.Max(1, (_origin.Right - _origin.Left) / _scale);
+        double originH = Math.Max(1, (_origin.Bottom - _origin.Top) / _scale);
+        _startScaleX = (float)Math.Clamp(originW / Card.Width, 0.01, 1);
+        _startScaleY = (float)Math.Clamp(originH / Card.Height, 0.01, 1);
+        _shape.InsertScalar("StartScaleY", _startScaleY);
+        _shape.InsertScalar("OriginRadius", (float)(_originRadiusPixels / _scale));
+        _originOffset = new Vector3(
+            (float)((_origin.Left - _outerBounds.X) / _scale + originW / 2 - (_layoutOffset.X + Card.Width / 2)),
+            (float)((_origin.Top - _outerBounds.Y) / _scale + originH / 2 - (_layoutOffset.Y + Card.Height / 2)), 0);
     }
 
-    private void StartEnterAnimation()
+    private void ApplyStartTransform()
+    {
+        var visual = Motion.Visual(Card);
+        visual.CenterPoint = new Vector3((float)Card.Width / 2, (float)Card.Height / 2, 0);
+        visual.Properties.InsertVector3("Translation", _originOffset);
+        visual.Scale = new Vector3(_startScaleX, _startScaleY, 1);
+        visual.RotationAxis = Vector3.Normalize(new Vector3(0.18f, 1, 0));
+        visual.RotationAngleInDegrees = _style == IslandStyleKind.Fluent ? 0 : (float)EnterTilt;
+        visual.Opacity = 0;
+        Motion.Visual(Scrim).Opacity = 0;
+        Motion.Visual(Hint).Opacity = 0;
+    }
+
+    private void StartEnterAnimation(bool replacing = false)
     {
         var visual = ElementCompositionPreview.GetElementVisual(Card);
         var compositor = visual.Compositor;
-        var ease = compositor.CreateCubicBezierEasingFunction(new Vector2(0.22f, 1.18f), new Vector2(0.36f, 1f));
+        var ease = Motion.Ease(compositor);
+        int version = ++_motionVersion;
         var easeIn = compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0.9f), new Vector2(0.3f, 1f));
 
+        Motion.Scalar(Motion.Visual(SpotlightHost), "Opacity", 1, 180);
         _shown = true;
         _opening = true;
         _armed = false;
@@ -408,15 +511,18 @@ public sealed partial class SpotlightWindow : Window
 
         var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
 
-        AnimateVector(visual, "Offset", compositor, _layoutOffset, FlyInMs, ease);
-        AnimateVector(visual, "Scale", compositor, Vector3.One, FlyInMs, ease);
+        if (!replacing)
+        {
+            Motion.Vector(visual, "Translation", Vector3.Zero, FlyInMs);
+            AnimateVector(visual, "Scale", compositor, Vector3.One, FlyInMs, ease);
+        }
         AnimateScalar(visual, "RotationAngleInDegrees", compositor, 0f, FlyInMs, ease);
         AnimateScalar(visual, "Opacity", compositor, 1f, CardFadeInMs, easeIn);
 
         if (_sessionActive)
         {
-            ElementCompositionPreview.GetElementVisual(Scrim).Opacity = ScrimOpacity;
-            ElementCompositionPreview.GetElementVisual(Hint).Opacity = 1f;
+            AnimateScalar(Motion.Visual(Scrim), "Opacity", compositor, ScrimOpacity, ScrimFadeInMs, ease);
+            AnimateScalar(Motion.Visual(Hint), "Opacity", compositor, 1, HintFadeMs, ease);
         }
         else
         {
@@ -424,26 +530,23 @@ public sealed partial class SpotlightWindow : Window
                 ElementCompositionPreview.GetElementVisual(Scrim), "Opacity", compositor, ScrimOpacity, ScrimFadeInMs, easeIn);
 
             var hint = compositor.CreateScalarKeyFrameAnimation();
-            hint.DelayTime = TimeSpan.FromMilliseconds(HintDelayMs);
-            hint.Duration = TimeSpan.FromMilliseconds(HintFadeMs);
+            hint.DelayTime = Motion.Enabled ? TimeSpan.FromMilliseconds(HintDelayMs) : TimeSpan.Zero;
+            hint.Duration = Motion.Duration(HintFadeMs);
             hint.InsertKeyFrame(1f, 1f, easeIn);
             ElementCompositionPreview.GetElementVisual(Hint).StartAnimation("Opacity", hint);
         }
 
-        batch.End();
         batch.Completed += (_, _) =>
         {
-            if (!_shown) return;
+            batch.Dispose();
+            if (version != _motionVersion || !_shown || _disposed) return;
+            SpotlightLeaving.Content = null;
             _opening = false;
             _armed = true;
             Scrim.IsHitTestVisible = true;
             _log.Debug($"聚光卡入场完成：offset=({visual.Offset.X:F0},{visual.Offset.Y:F0}) scale={visual.Scale.X:F2} opacity={visual.Opacity:F2}。");
-            if (_pendingClose)
-            {
-                _pendingClose = false;
-                CloseOverlay();
-            }
         };
+        batch.End();
     }
 
     private void FinishClose()
@@ -451,10 +554,12 @@ public sealed partial class SpotlightWindow : Window
         // 先结束输入会话（_closing 为 true，Exited 不会把刚撤下的 Esc 热键又装回去），
         // 再藏窗口 —— 随后的失活就是老样式下的正常路径了
         _input.End();
+        Landing?.Invoke();
         AppWindow.Hide();
 
         // 先藏窗口再复位视觉状态，下一次打开才不会闪一帧"已经居中"的卡片
         ResetVisuals();
+        SpotlightLeaving.Content = null;
         SpotlightHost.Content = null;      // 触发插件视图的 Unloaded：停表、收尾都在那边做
         if (_hotKeyInstalled)
         {
@@ -463,24 +568,21 @@ public sealed partial class SpotlightWindow : Window
         }
 
         _shown = false;
+        _pendingShow = false;
         _closing = false;
+        _opening = false;
         Dismissed?.Invoke();
 
-        if (_pendingShow is { } pending)
-        {
-            _pendingShow = null;
-            ShowOverlay(pending.Origin, pending.OriginSize, pending.Content, pending.Style, pending.Material);
-        }
     }
 
     private void ResetVisuals()
     {
         var card = ElementCompositionPreview.GetElementVisual(Card);
-        card.StopAnimation("Offset");
+        card.StopAnimation("Translation");
         card.StopAnimation("Scale");
         card.StopAnimation("RotationAngleInDegrees");
         card.StopAnimation("Opacity");
-        card.Offset = _layoutOffset;
+        card.Properties.InsertVector3("Translation", Vector3.Zero);
         card.Scale = Vector3.One;
         card.RotationAngleInDegrees = 0f;
         card.Opacity = 1f;
@@ -529,27 +631,31 @@ public sealed partial class SpotlightWindow : Window
     /// 聚光卡铺满的显示器：**主岛所在的那块**（飞入起点就是主岛矩形，所以卡片必须开在同一块屏上，
     /// 否则会从另一块屏飞过来）。
     ///
-    /// 这里不再"从岛矩形反推"——反推用的是 <c>DisplayAreaFallback.Nearest</c>，在显示器排列有重叠、
-    /// 或岛刚好压在两块屏交界处时会挑错屏（岛在主屏、卡片开到副屏）。改为：
-    /// 主岛矩形有效时按它取屏（岛是真的在那块屏上，这是等价于"岛所在屏"的可靠判据）；
-    /// 矩形无效（还没定位好）时退回主显示器。
+    /// 按主岛矩形与各显示器外框的重叠面积挑（<see cref="DisplayResolver.MonitorOf(Win32.RECT)"/>）——
+    /// 岛是真的在那块屏上，这是"岛所在屏"最可靠的判据；矩形无效（还没定位好）时退回主显示器。
+    /// 不能用 <c>DisplayAreaFallback.Nearest</c> 反推：显示器排列有重叠、或岛刚好压在两块屏交界处时会挑错屏。
     /// </summary>
-    private static DisplayArea ResolveDisplay(Win32.RECT origin, out RectInt32 outerBounds)
+    private static MonitorInfo ResolveDisplay(Win32.RECT origin, out RectInt32 outerBounds)
     {
+        var monitors = DisplayResolver.List();
         int width = origin.Right - origin.Left;
         int height = origin.Bottom - origin.Top;
-        var area = width > 0 && height > 0
-            ? DisplayResolver.FromRect(new RectInt32(origin.Left, origin.Top, width, height))
-            : DisplayArea.GetFromRect(new RectInt32(0, 0, 1, 1), DisplayAreaFallback.Primary);
-        outerBounds = area.OuterBounds;
-        return area;
+        var monitor = (width > 0 && height > 0
+                ? MonitorLayout.BestFit(monitors, origin.Left, origin.Top, width, height)
+                : null)
+            ?? MonitorLayout.Primary(monitors)
+            ?? new MonitorInfo(string.Empty, true, 0, 0, 1, 1, 0, 0, 1, 1);
+
+        outerBounds = new RectInt32(monitor.X, monitor.Y, monitor.Width, monitor.Height);
+        return monitor;
     }
 
     private static void AnimateVector(Visual visual, string property, Compositor compositor,
         Vector3 to, int milliseconds, CompositionEasingFunction ease)
     {
         var animation = compositor.CreateVector3KeyFrameAnimation();
-        animation.Duration = TimeSpan.FromMilliseconds(milliseconds);
+        animation.Duration = Motion.Duration(milliseconds);
+        animation.InsertExpressionKeyFrame(0, "this.StartingValue");
         animation.InsertKeyFrame(1f, to, ease);
         visual.StartAnimation(property, animation);
     }
@@ -558,7 +664,8 @@ public sealed partial class SpotlightWindow : Window
         float to, int milliseconds, CompositionEasingFunction ease)
     {
         var animation = compositor.CreateScalarKeyFrameAnimation();
-        animation.Duration = TimeSpan.FromMilliseconds(milliseconds);
+        animation.Duration = Motion.Duration(milliseconds);
+        animation.InsertExpressionKeyFrame(0, "this.StartingValue");
         animation.InsertKeyFrame(1f, to, ease);
         visual.StartAnimation(property, animation);
     }

@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using WinIsland.Core;
+using WinIsland.PluginViews;
 
 namespace ClipboardIsland;
 
@@ -14,7 +15,7 @@ namespace ClipboardIsland;
 ///   1. 所有元素（含只在展开态出现的）一开始就常驻可视树；
 ///   2. 隐藏用 Height = 0 + Opacity = 0，不要用 Visibility.Collapsed（无法过渡）；
 ///   3. 形态动画逐帧直接赋值，**不要用 Storyboard**（原因见 StartMorph 注释）；
-///   4. 缓动与宿主一致：BackEase(EaseOut, Amplitude: 0.45)。
+///   4. 帧同步的单调缓动；反转时从当前进度继续。
 ///
 /// 「复制时闪一下」也是逐帧做的：一条 16ms 定时器跑闪光包络，
 /// 只动一个小小的强调条和图标颜色，不碰布局，避免每帧触发重排。
@@ -41,8 +42,7 @@ public sealed class ClipboardIslandView : UserControl, IMorphView
     private const double ExpandedDetailHeight = 104;
     private const int ExpandedRows = 3;
 
-    /// <summary>与宿主内置视图同一条 BackEase 曲线的幅度，手感保持一致。</summary>
-    private const double BackAmplitude = 0.45;
+
 
     /// <summary>闪光包络：0 → 快速拉满 → 保持 → 淡出。</summary>
     private const double FlashAttack = 0.14;
@@ -63,11 +63,8 @@ public sealed class ClipboardIslandView : UserControl, IMorphView
     private readonly SolidColorBrush _accentIconBrush;
     private readonly IIslandTheme _theme;
 
-    private readonly DispatcherQueueTimer? _morphTimer;
-    private DateTimeOffset _morphStart;
-    private TimeSpan _morphDuration = TimeSpan.FromMilliseconds(333);
-    private double _morphFrom;
-    private double _morphTarget;
+    private readonly MorphProgress _morph;
+    private ClipItem[] _displayedItems = [];
 
     /// <summary>当前形态进度：0 = 紧凑态，1 = 展开态。反转动画时从这里接着走。</summary>
     private double _progress;
@@ -203,14 +200,8 @@ public sealed class ClipboardIslandView : UserControl, IMorphView
 
         Content = root;
 
-        // 逐帧动画用的 UI 线程定时器；拿不到就退化成「直接切终态」，绝不留下中间值
-        _morphTimer = DispatcherQueue?.CreateTimer();
-        if (_morphTimer is not null)
-        {
-            _morphTimer.Interval = TimeSpan.FromMilliseconds(16);
-            _morphTimer.IsRepeating = true;
-            _morphTimer.Tick += (_, _) => OnMorphTick();
-        }
+        // 仅在动画运行期间订阅 Rendering，卸载后立即解除订阅
+        _morph = new MorphProgress(ApplyMorph);
 
         _flashTimer = DispatcherQueue?.CreateTimer();
         if (_flashTimer is not null)
@@ -222,7 +213,7 @@ public sealed class ClipboardIslandView : UserControl, IMorphView
 
         Unloaded += (_, _) =>
         {
-            _morphTimer?.Stop();
+            _morph.Complete();
             _flashTimer?.Stop();
         };
     }
@@ -235,11 +226,19 @@ public sealed class ClipboardIslandView : UserControl, IMorphView
         _headItem = items.Count > 0 ? items[0] : null;
         _count.Text = items.Count > 0 ? items.Count.ToString() : string.Empty;
 
-        _detailRows.Children.Clear();
         var shown = Math.Min(ExpandedRows, items.Count);
-        for (var i = 0; i < shown; i++)
+        var shownItems = items.Take(shown).ToArray();
+        if (!_displayedItems.SequenceEqual(shownItems))
         {
-            _detailRows.Children.Add(new ClipRow(items[i], _theme, interactive: true, invoke: _onPick, dense: true, onDelete: _onDelete));
+            var previousIds = _displayedItems.Select(item => item.Id).ToHashSet();
+            _displayedItems = shownItems;
+            _detailRows.Children.Clear();
+            foreach (var item in shownItems)
+            {
+                var row = new ClipRow(item, _theme, interactive: true, invoke: _onPick, dense: true, onDelete: _onDelete);
+                _detailRows.Children.Add(row);
+                if (_morph.Value > 0.99 && IsLoaded && !previousIds.Contains(item.Id)) Motion.Reveal(row, 180, 4);
+            }
         }
 
         _detailHint.Text = items.Count switch
@@ -346,49 +345,13 @@ public sealed class ClipboardIslandView : UserControl, IMorphView
     /// 结果是岛体尺寸收回去了、插件的 Height 却卡在中间值，整块内容错位且不再响应 hover。
     /// 宿主内置视图能安全使用 Storyboard，是因为它们在宿主程序集里；插件侧必须逐帧赋值。
     /// </summary>
-    private void StartMorph(double target, TimeSpan duration)
-    {
-        _morphFrom = _progress;
-        _morphTarget = target;
-        _morphDuration = duration > TimeSpan.Zero ? duration : TimeSpan.FromMilliseconds(1);
-        _morphStart = DateTimeOffset.UtcNow;
-
-        if (_morphTimer is null)
-        {
-            ApplyMorph(target);
-            return;
-        }
-
-        _morphTimer.Start();
-    }
-
-    private void OnMorphTick()
-    {
-        var elapsed = (DateTimeOffset.UtcNow - _morphStart).TotalMilliseconds;
-        var durationMs = Math.Max(1, _morphDuration.TotalMilliseconds);
-        var t = Math.Clamp(elapsed / durationMs, 0, 1);
-
-        ApplyMorph(_morphFrom + (_morphTarget - _morphFrom) * BackEaseOut(t));
-
-        if (t >= 1)
-        {
-            _morphTimer?.Stop();
-            ApplyMorph(_morphTarget);   // 收尾时锁定终态，避免残留中间值
-        }
-    }
-
-    /// <summary>BackEase(EaseOut, A) = 1 + (A+1)(t-1)³ + A(t-1)²，与 XAML 那条曲线等价。</summary>
-    private static double BackEaseOut(double t)
-    {
-        var d = t - 1;
-        return 1 + (BackAmplitude + 1) * d * d * d + BackAmplitude * d * d;
-    }
+    private void StartMorph(double target, TimeSpan duration) => _morph.To(target, duration);
 
     private void ApplyMorph(double progress)
     {
         _progress = progress;
 
-        // Height 不能为负（BackEase 在终点附近会把曲线推到目标值以下）
+        // 布局尺寸保持非负
         _detail.Height = Math.Max(0, ExpandedDetailHeight * progress);
         _detail.Opacity = Math.Clamp(progress, 0, 1);
 

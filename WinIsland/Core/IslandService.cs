@@ -13,6 +13,9 @@ public sealed class IslandService
     // 投放目标台账：宿主内置的先注册（Order 900+），插件注册的按 Order 排在前面
     private readonly List<(string Owner, IslandDropTarget Target)> _dropTargets = new();
 
+    /// <summary>进程内插件事件总线（宿主自己也用它广播生命周期事件）。</summary>
+    public PluginBus Bus { get; } = new();
+
     public IslandService(IslandWindow island, SettingsService settings, IPluginLogger log)
     {
         _island = island;
@@ -32,6 +35,13 @@ public sealed class IslandService
 
     public void SetLiveContent(string ownerId, IslandLiveContent? content)
         => RunOnUI(() => _island.SetLive(ownerId, content));
+
+    /// <summary>
+    /// 多实例版本：<paramref name="instanceId"/> 为 null 时与单实例那条完全等价
+    /// （同一个 key，同样的覆盖语义），因此既有插件的调用路径一个字节都不用变。
+    /// </summary>
+    public void SetLiveContent(string ownerId, string? instanceId, IslandLiveContent? content)
+        => RunOnUI(() => _island.SetLive(ownerId, instanceId, content));
 
     public void SendMessage(IslandMessage message)
         => RunOnUI(() => _island.ShowMessage(message));

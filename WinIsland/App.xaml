@@ -16,7 +16,13 @@
                 <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
                 <Setter Property="BorderThickness" Value="1" />
                 <Setter Property="CornerRadius" Value="8" />
-                <Setter Property="Padding" Value="16,12" />
+                <Setter Property="Padding" Value="20,16" />
+            </Style>
+
+            <Style x:Key="SettingsSectionHeadingStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="16" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Margin" Value="0,24,0,8" />
             </Style>
 
             <!-- 带示意图的单选卡片（位置 / 外观 / 材质 / 自启）：用 Button 承载，点击、键盘与无障碍天然可用 -->
@@ -41,6 +47,9 @@
                                 CornerRadius="{TemplateBinding CornerRadius}">
                                 <VisualStateManager.VisualStateGroups>
                                     <VisualStateGroup x:Name="CommonStates">
+                                        <VisualStateGroup.Transitions>
+                                            <VisualTransition GeneratedDuration="0:0:0.12" />
+                                        </VisualStateGroup.Transitions>
                                         <VisualState x:Name="Normal" />
                                         <VisualState x:Name="PointerOver">
                                             <VisualState.Setters>

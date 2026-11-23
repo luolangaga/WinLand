@@ -12,6 +12,13 @@ public sealed class BatteryViewModel : INotifyPropertyChanged
     private double _chargePower;
     private string _statusText = "未在充电";
 
+    private string _backgroundMode = "beam";
+    private double _backgroundIntensity = 0.50;
+    public string BackgroundMode { get => _backgroundMode; set => SetField(ref _backgroundMode, value); }
+    public double BackgroundIntensity { get => _backgroundIntensity; set => SetField(ref _backgroundIntensity, value); }
+    private bool _glowEnabled = true;
+    public bool GlowEnabled { get => _glowEnabled; set => SetField(ref _glowEnabled, value); }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public int Percent

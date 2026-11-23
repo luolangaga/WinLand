@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using WinIsland.Core;
+using WinIsland.PluginViews;
 
 namespace DeviceIsland;
 
@@ -13,7 +14,7 @@ namespace DeviceIsland;
 ///   1. 所有元素（含只在展开态出现的）一开始就常驻可视树；
 ///   2. 隐藏用 Height = 0 + Opacity = 0，不要用 Visibility.Collapsed（无法过渡）；
 ///   3. 形态动画逐帧直接赋值，**不要用 Storyboard**（原因见 StartMorph 注释）；
-///   4. 缓动与宿主一致：BackEase(EaseOut, Amplitude: 0.45)。
+///   4. 帧同步的单调缓动；反转时从当前进度继续。
 ///
 /// 「刚插上」的强调也是逐帧做的：一条 16ms 定时器跑一个包络，
 /// 只动左侧强调条和图标颜色，不碰布局，避免每帧触发重排。
@@ -33,8 +34,7 @@ public sealed class DeviceIslandView : UserControl, IMorphView
     private const double ExpandedDetailHeight = 118;
     private const int ExpandedRows = 3;
 
-    /// <summary>与宿主内置视图同一条 BackEase 曲线的幅度，手感保持一致。</summary>
-    private const double BackAmplitude = 0.45;
+
 
     /// <summary>强调包络：0 → 快速拉满 → 保持 → 淡出。</summary>
     private const double FlashAttack = 0.14;
@@ -52,17 +52,14 @@ public sealed class DeviceIslandView : UserControl, IMorphView
     private readonly SolidColorBrush _idleIconBrush;
     private readonly SolidColorBrush _accentIconBrush;
 
-    private readonly DispatcherQueueTimer? _morphTimer;
-    private DateTimeOffset _morphStart;
-    private TimeSpan _morphDuration = TimeSpan.FromMilliseconds(333);
-    private double _morphFrom;
-    private double _morphTarget;
+    private readonly MorphProgress _morph;
     private double _progress;                        // 0 = 紧凑，1 = 展开
 
     private readonly DispatcherQueueTimer? _flashTimer;
     private DateTimeOffset _flashStart;
     private TimeSpan _flashDuration = TimeSpan.FromSeconds(3);
     private readonly IIslandTheme _theme;
+    private DeviceInfo[] _displayedDevices = [];
 
     internal DeviceIslandView(PluginManifest manifest, Action<DeviceInfo> onOpen, Action<DeviceInfo> onEject, IIslandTheme theme)
     {
@@ -170,14 +167,8 @@ public sealed class DeviceIslandView : UserControl, IMorphView
 
         Content = root;
 
-        // 逐帧动画用的 UI 线程定时器；拿不到就退化成「直接切终态」，绝不留下中间值
-        _morphTimer = DispatcherQueue?.CreateTimer();
-        if (_morphTimer is not null)
-        {
-            _morphTimer.Interval = TimeSpan.FromMilliseconds(16);
-            _morphTimer.IsRepeating = true;
-            _morphTimer.Tick += (_, _) => OnMorphTick();
-        }
+        // 仅在动画运行期间订阅 Rendering，卸载后立即解除订阅
+        _morph = new MorphProgress(ApplyMorph);
 
         _flashTimer = DispatcherQueue?.CreateTimer();
         if (_flashTimer is not null)
@@ -189,7 +180,7 @@ public sealed class DeviceIslandView : UserControl, IMorphView
 
         Unloaded += (_, _) =>
         {
-            _morphTimer?.Stop();
+            _morph.Complete();
             _flashTimer?.Stop();
         };
     }
@@ -205,11 +196,19 @@ public sealed class DeviceIslandView : UserControl, IMorphView
     {
         _count.Text = devices.Count > 0 ? devices.Count.ToString() : string.Empty;
 
-        _detailRows.Children.Clear();
         var shown = Math.Min(ExpandedRows, devices.Count);
-        for (var i = 0; i < shown; i++)
+        var shownDevices = devices.Take(shown).ToArray();
+        if (_displayedDevices.Length != shown || !_displayedDevices.Zip(shownDevices).All(pair => pair.First.HasSamePresentation(pair.Second)))
         {
-            _detailRows.Children.Add(new DeviceRow(devices[i], _theme, _onOpen, _onEject, dense: true));
+            var previousIds = _displayedDevices.Select(device => device.Id).ToHashSet();
+            _displayedDevices = shownDevices;
+            _detailRows.Children.Clear();
+            foreach (var device in shownDevices)
+            {
+                var row = new DeviceRow(device, _theme, _onOpen, _onEject, dense: true);
+                _detailRows.Children.Add(row);
+                if (_morph.Value > 0.99 && IsLoaded && !previousIds.Contains(device.Id)) Motion.Reveal(row, 180, 4);
+            }
         }
 
         _detailHint.Text = devices.Count switch
@@ -233,7 +232,7 @@ public sealed class DeviceIslandView : UserControl, IMorphView
     /// <summary>闪一下强调条（刚插上 / 刚拔掉）。</summary>
     private void StartFlash()
     {
-        if (_flashTimer is null)
+        if (_flashTimer is null || !Motion.Enabled)
         {
             EndFlash();
             return;
@@ -251,49 +250,13 @@ public sealed class DeviceIslandView : UserControl, IMorphView
 
     public void AnimateToCompact(TimeSpan duration) => StartMorph(0, duration);
 
-    private void StartMorph(double target, TimeSpan duration)
-    {
-        _morphFrom = _progress;
-        _morphTarget = target;
-        _morphDuration = duration > TimeSpan.Zero ? duration : TimeSpan.FromMilliseconds(1);
-        _morphStart = DateTimeOffset.UtcNow;
-
-        if (_morphTimer is null)
-        {
-            ApplyMorph(target);
-            return;
-        }
-
-        _morphTimer.Start();
-    }
-
-    private void OnMorphTick()
-    {
-        var elapsed = (DateTimeOffset.UtcNow - _morphStart).TotalMilliseconds;
-        var durationMs = Math.Max(1, _morphDuration.TotalMilliseconds);
-        var t = Math.Clamp(elapsed / durationMs, 0, 1);
-
-        ApplyMorph(_morphFrom + (_morphTarget - _morphFrom) * BackEaseOut(t));
-
-        if (t >= 1)
-        {
-            _morphTimer?.Stop();
-            ApplyMorph(_morphTarget);   // 收尾时锁定终态，避免残留中间值
-        }
-    }
-
-    /// <summary>BackEase(EaseOut, A) = 1 + (A+1)(t-1)³ + A(t-1)²，与 XAML 那条曲线等价。</summary>
-    private static double BackEaseOut(double t)
-    {
-        var d = t - 1;
-        return 1 + (BackAmplitude + 1) * d * d * d + BackAmplitude * d * d;
-    }
+    private void StartMorph(double target, TimeSpan duration) => _morph.To(target, duration);
 
     private void ApplyMorph(double progress)
     {
         _progress = progress;
 
-        // Height 不能为负（BackEase 在终点附近会把曲线推到目标值以下）
+        // 布局尺寸保持非负
         _detail.Height = Math.Max(0, ExpandedDetailHeight * progress);
         _detail.Opacity = Math.Clamp(progress, 0, 1);
 

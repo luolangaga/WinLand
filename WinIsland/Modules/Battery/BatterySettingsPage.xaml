@@ -16,6 +16,10 @@
             Text="监听充电状态，绿色填充灵动岛代表当前电量，悬停展开查看详情" />
 
         <Border Style="{StaticResource SettingsCardStyle}">
+            <StackPanel x:Name="BackgroundOptions" />
+        </Border>
+
+        <Border Style="{StaticResource SettingsCardStyle}">
             <Grid ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />

@@ -1,0 +1,7 @@
+{
+  "id": "agenthub", "name": "AgentHub", "version": "0.1.0",
+  "description": "Windows 编程代理中心：本地会话、Token、额度、实时 hooks 与审批",
+  "author": "WinIsland", "icon_glyph": "\uE99A", "entry_dll": "AgentHub.dll",
+  "api_version": 2, "min_host_version": "2.5.0", "license": "Apache-2.0",
+  "tags": ["sample", "agents", "claude", "codex"]
+}

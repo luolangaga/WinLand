@@ -46,9 +46,11 @@ public sealed partial class GeneralSettingsPage : UserControl
         InitializeComponent();
 
         BuildChoiceCards();
+        IdleEdgeToggle.IsOn = _settings.Get("island.idleEdgeHide", false);
 
         VisibleToggle.IsOn = _settings.Get("island.visible", true);
         HideIdleToggle.IsOn = _settings.Get("island.hideWhenIdle", false);
+        ActivityCountToggle.IsOn = _settings.Get("island.showActivityCount", true);
         DropToggle.IsOn = _settings.Get("island.dropEnabled", true);
         HoverExpandToggle.IsOn = _settings.Get(HoverExpandKey, true);
         HoverDelaySlider.Value = _settings.Get(HoverDelayKey, 0.0);
@@ -64,6 +66,10 @@ public sealed partial class GeneralSettingsPage : UserControl
 
         LoadOffsetControl();
         HorizontalOffsetSlider.Value = _settings.Get(HorizontalOffsetKey, 0.0);
+
+        QuietCombo.SelectedIndex = 1;      // 默认 30 分钟
+        RefreshQuietState();
+        RefreshPlacementState();
 
         _autoStartApplied = AutoStartService.Current(
             AutoStartService.Parse(_settings.Get(AutoStartService.SettingKey, "off")));
@@ -150,6 +156,9 @@ public sealed partial class GeneralSettingsPage : UserControl
 
         RebuildDisplayCards();
     }
+
+    /// <summary>可靠性测试用：显示器卡片所在的网格（生产代码不读它）。</summary>
+    internal Grid DisplayCardsForTest => DisplayCards;
 
     /// <summary>
     /// 显示器卡片：第一张固定是「自动（跟随鼠标）」，后面是这台机器实际枚举到的每一块屏。
@@ -356,13 +365,18 @@ public sealed partial class GeneralSettingsPage : UserControl
     // ---- 偏移滑杆 ----
 
     /// <summary>偏移滑杆跟随位置模式：两套文案 + 两条设置键各自记忆。</summary>
+    private void IdleEdgeToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_loading) _settings.Set("island.idleEdgeHide", IdleEdgeToggle.IsOn);
+    }
+
     private void LoadOffsetControl()
     {
         bool wasLoading = _loading;
         _loading = true;
         bool bottom = IsBottom();
         OffsetTitle.Text = bottom ? "底部偏移" : "顶部偏移";
-        OffsetHint.Text = bottom ? "灵动岛距离任务栏底部的距离 (px)" : "灵动岛距离屏幕顶部的距离 (px)";
+        OffsetHint.Text = bottom ? "距离任务栏底部的距离 (DIP)，负值可向外移动" : "距离工作区顶部的距离 (DIP)，负值可嵌入顶部任务栏";
         OffsetSlider.Value = _settings.Get(bottom ? BottomOffsetKey : TopOffsetKey, 6.0);
         _loading = wasLoading;
     }
@@ -383,6 +397,12 @@ public sealed partial class GeneralSettingsPage : UserControl
     {
         if (_loading) return;
         _settings.Set("island.dropEnabled", DropToggle.IsOn);
+    }
+
+    private void ActivityCountToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _settings.Set("island.showActivityCount", ActivityCountToggle.IsOn);
     }
 
     private void HoverExpandToggle_Toggled(object sender, RoutedEventArgs e)
@@ -445,4 +465,69 @@ public sealed partial class GeneralSettingsPage : UserControl
     }
 
     private void RunOnboarding_Click(object sender, RoutedEventArgs e) => _openOnboarding?.Invoke();
+
+    // ---- 勿扰 ----
+
+    /// <summary>静默时长选项：与 <see cref="QuietMode.SnoozeMinutes"/> 一一对应。</summary>
+    private static readonly int[] QuietMinutes = { 15, 30, 60, 120 };
+
+    private void RefreshQuietState()
+    {
+        bool active = QuietMode.IsActive(_settings);
+        QuietButton.Content = active ? "结束静默" : "开始静默";
+        QuietHint.Text = active
+            ? $"正在静默，还剩 {QuietMode.DescribeRemaining(_settings)}：消息只记进历史、不弹出来"
+            : "静默期间不弹临时消息、也不因新活动自动现身；消息照样记进历史";
+        QuietCombo.IsEnabled = !active;
+    }
+
+    private void QuietCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading) return;
+        // 选中项本身不落盘（时长只在点「开始静默」那一刻才决定），这里只是保持界面一致
+        RefreshQuietState();
+    }
+
+    private void QuietButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (QuietMode.IsActive(_settings))
+        {
+            QuietMode.End(_settings);
+        }
+        else
+        {
+            int index = Math.Clamp(QuietCombo.SelectedIndex, 0, QuietMinutes.Length - 1);
+            QuietMode.Snooze(_settings, TimeSpan.FromMinutes(QuietMinutes[index]));
+        }
+
+        RefreshQuietState();
+    }
+
+    // ---- 手动位置 ----
+
+    private void RefreshPlacementState()
+    {
+        bool manual = _settings.Get<double?>("island.dragX", null) is not null;
+        ResetPlacementButton.IsEnabled = manual;
+        DragPlacementHint.Text = manual
+            ? "当前是手动位置。按住 Alt 再拖岛体（或按住中键拖动）可以重新摆放"
+            : "按住 Alt 再拖岛体（或按住中键拖动）可以把它摆到任意位置；改了位置/对齐设置会自动回到自动落位";
+    }
+
+    private void ResetPlacement_Click(object sender, RoutedEventArgs e)
+    {
+        // 岛体自己会在设置变化时重算落点；这里删两个键就够了
+        if (_settings is SettingsService service)
+        {
+            service.Remove("island.dragX");
+            service.Remove("island.dragY");
+        }
+        else
+        {
+            _settings.Set<double?>("island.dragX", null);
+            _settings.Set<double?>("island.dragY", null);
+        }
+
+        RefreshPlacementState();
+    }
 }

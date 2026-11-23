@@ -14,7 +14,16 @@ public sealed class PluginScope
 
     public string PluginId { get; }
 
-    public bool IsRevoked { get; private set; }
+    private volatile bool _revoked;
+    public bool IsRevoked => _revoked;
+
+    internal void Execute(Action action)
+    {
+        lock (_gate)
+        {
+            if (!IsRevoked) action();
+        }
+    }
 
     public T Register<T>(T disposable) where T : IDisposable
     {
@@ -42,7 +51,7 @@ public sealed class PluginScope
                 return;
             }
 
-            IsRevoked = true;
+            _revoked = true;
             items = _disposables.ToArray();
             _disposables.Clear();
         }

@@ -42,7 +42,7 @@
                     Spacing="10">
                     <ProgressRing x:Name="Busy" Width="18" Height="18" IsActive="False" />
                     <Button
-                        x:Name="CheckButton"
+ AutomationProperties.AutomationId="CheckButton"                        x:Name="CheckButton"
                         Click="Check_Click"
                         Content="检查更新" />
                 </StackPanel>
@@ -83,16 +83,16 @@
                 </Border>
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button
-                        x:Name="OpenReleaseButton"
+ AutomationProperties.AutomationId="OpenReleaseButton"                        x:Name="OpenReleaseButton"
                         Click="OpenRelease_Click"
                         Style="{StaticResource AccentButtonStyle}" />
                     <Button
-                        x:Name="DirectButton"
+ AutomationProperties.AutomationId="DirectButton"                        x:Name="DirectButton"
                         Click="DirectDownload_Click"
                         Content="直接下载本机安装包"
                         Visibility="Collapsed" />
                     <Button
-                        x:Name="SkipButton"
+ AutomationProperties.AutomationId="SkipButton"                        x:Name="SkipButton"
                         Click="Skip_Click"
                         Content="跳过此版本" />
                 </StackPanel>
@@ -139,7 +139,7 @@
                         TextWrapping="Wrap" />
                 </StackPanel>
                 <ToggleSwitch
-                    x:Name="AutoCheckToggle"
+ AutomationProperties.AutomationId="AutoCheckToggle"                    x:Name="AutoCheckToggle"
                     Grid.Column="1"
                     MinWidth="0"
                     VerticalAlignment="Center"

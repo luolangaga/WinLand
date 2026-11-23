@@ -1,0 +1,40 @@
+name: Regression checks
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      ui:
+        description: Run isolated WinUI lifecycle and virtualization tests
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build and run regression scenarios
+        shell: pwsh
+        run: ./tools/Test-Reliability.ps1
+      - name: Build example plugins
+        shell: pwsh
+        run: |
+          Get-ChildItem samples -Recurse -Filter *.csproj | ForEach-Object {
+            dotnet build $_.FullName -v quiet
+            if ($LASTEXITCODE -ne 0) { throw "Example build failed: $($_.FullName)" }
+          }
+      - name: Isolated WinUI checks
+        if: github.event_name == 'workflow_dispatch' && inputs.ui
+        shell: pwsh
+        run: ./tools/Test-Reliability.ps1 -Ui
+      - uses: actions/upload-artifact@v4
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.ui
+        with:
+          name: winui-regression-results
+          path: WinIsland/bin/**/reliability-tests/results.json

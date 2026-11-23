@@ -15,6 +15,20 @@
                 Style="{StaticResource CaptionTextBlockStyle}"
                 Text="监听 Windows 系统媒体会话，把正在播放的音乐显示在灵动岛上" />
 
+        <Border Style="{StaticResource SettingsCardStyle}">
+            <StackPanel x:Name="BackgroundOptions" />
+        </Border>
+
+            <Border Style="{StaticResource SettingsCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="小岛播放律动" />
+                        <TextBlock Text="播放时显示经典波浪指示，与背景动效独立" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                    <ToggleSwitch x:Name="WaveToggle" Grid.Column="1" AutomationProperties.AutomationId="MediaWaveEnabled" AutomationProperties.Name="小岛播放律动" OffContent="" OnContent="" MinWidth="0" Toggled="WaveToggle_Toggled" />
+                </Grid>
+            </Border>
             <Border Style="{StaticResource SettingsCardStyle}">
                 <Grid ColumnSpacing="16">
                     <Grid.ColumnDefinitions>
@@ -47,11 +61,11 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Spacing="2" VerticalAlignment="Center">
-                        <TextBlock Text="节奏光晕" />
+                        <TextBlock Text="音乐律动背景" />
                         <TextBlock
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="展开岛体时显示随音乐脉动的彩色光晕背景"
+                            Text="岛体和聚光卡随真实音频节奏律动；暂停时停止"
                             TextWrapping="Wrap" />
                     </StackPanel>
                     <ToggleSwitch
@@ -76,7 +90,7 @@
                         <TextBlock
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="点击岛体打开超级大卡片时显示逐行滚动歌词（需联网，来自 LRCLIB / 网易云；取不到会退回播放卡）"
+                            Text="聚光卡跟随歌曲滚动歌词；无播放进度时可手动浏览（需联网）"
                             TextWrapping="Wrap" />
                     </StackPanel>
                     <ToggleSwitch
@@ -101,7 +115,7 @@
                         <TextBlock
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="数值越高越优先显示在灵动岛上，默认 100"
+                            Text="数值越高越优先显示在灵动岛上，默认 200（高于 Clash 的 150）"
                             TextWrapping="Wrap" />
                     </StackPanel>
                     <Slider

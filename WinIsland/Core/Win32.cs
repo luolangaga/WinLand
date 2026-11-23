@@ -227,116 +227,95 @@ internal static partial class Win32
 
     // ---- 显示器枚举：拿 \\.\DISPLAYn 名字与它在虚拟桌面里的排列位置 ----
 
+    /// <summary>
+    /// MONITORINFOEX。**必须带 <c>CharSet.Unicode</c>**：缺了它 <c>szDevice</c> 按 ANSI 排布，
+    /// 结构体只有 72 字节（正确是 104），<c>GetMonitorInfo</c> 会直接失败并返回 0 块显示器。
+    /// </summary>
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct DISPLAY_DEVICE
+    private struct MONITORINFOEX
     {
-        public uint cb;
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string DeviceName;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string DeviceString;
-        public uint StateFlags;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string DeviceID;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string DeviceKey;
+        public string szDevice;
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct DEVMODE
-    {
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string dmDeviceName;
-        public ushort dmSpecVersion;
-        public ushort dmDriverVersion;
-        public ushort dmSize;
-        public ushort dmDriverExtra;
-        public uint dmFields;
-        public int dmPositionX;
-        public int dmPositionY;
-        public uint dmDisplayOrientation;
-        public uint dmDisplayFixedOutput;
-        public short dmColor;
-        public short dmDuplex;
-        public short dmYResolution;
-        public short dmTTOption;
-        public short dmCollate;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string dmFormName;
-        public ushort dmLogPixels;
-        public uint dmBitsPerPel;
-        public uint dmPelsWidth;
-        public uint dmPelsHeight;
-        public uint dmDisplayFlags;
-        public uint dmDisplayFrequency;
-        public uint dmICMMethod;
-        public uint dmICMIntent;
-        public uint dmMediaType;
-        public uint dmDitherType;
-        public uint dmReserved1;
-        public uint dmReserved2;
-        public uint dmPanningWidth;
-        public uint dmPanningHeight;
-    }
+    private const uint MONITORINFOF_PRIMARY = 0x0000_0001;
 
-    // DISPLAY_DEVICE.StateFlags
-    private const uint DISPLAY_DEVICE_ATTACHED_TO_DESKTOP = 0x00000001;
-    private const uint DISPLAY_DEVICE_PRIMARY_DEVICE = 0x00000004;
-    private const uint DISPLAY_DEVICE_MIRRORING_DRIVER = 0x00000008;
-
-    private const int ENUM_CURRENT_SETTINGS = -1;
+    private delegate bool MonitorEnumProc(nint hMonitor, nint hdc, nint lprcMonitor, nint dwData);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool EnumDisplayDevices(string? lpDevice, uint iDevNum, ref DISPLAY_DEVICE lpDisplayDevice, uint dwFlags);
+    private static extern bool EnumDisplayMonitors(nint hdc, nint lprcClip, MonitorEnumProc lpfnEnum, nint dwData);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool EnumDisplaySettings(string? lpszDeviceName, int iModeNum, ref DEVMODE lpDevMode);
+    private static extern bool GetMonitorInfo(nint hMonitor, ref MONITORINFOEX lpmi);
 
-    /// <summary>一块活动显示器的 Win32 视图（<c>\\.\DISPLAYn</c>、适配器名、是否主屏、在虚拟桌面里的排列原点）。</summary>
-    public readonly record struct DisplayDevice(string Name, string Adapter, bool IsPrimary, POINT Position);
+    /// <summary>枚举回调的委托必须由调用方持有到枚举结束，否则会被 GC 回收。</summary>
+    private static readonly MonitorEnumProc _monitorEnumProc = CollectMonitor;
+
+    /// <summary>枚举结果的暂存缓冲：按线程隔离 —— 设置页、岛窗口、平台看门狗可能同时来问。</summary>
+    [ThreadStatic]
+    private static List<MonitorInfo>? _monitorBuffer;
+
+    private static bool CollectMonitor(nint monitor, nint hdc, nint rect, nint data)
+    {
+        var info = new MONITORINFOEX { cbSize = Marshal.SizeOf<MONITORINFOEX>(), szDevice = string.Empty };
+        if (!GetMonitorInfo(monitor, ref info)) return true;
+
+        (_monitorBuffer ??= new List<MonitorInfo>(4)).Add(new MonitorInfo(
+            info.szDevice ?? string.Empty,
+            (info.dwFlags & MONITORINFOF_PRIMARY) != 0,
+            info.rcMonitor.Left,
+            info.rcMonitor.Top,
+            info.rcMonitor.Right - info.rcMonitor.Left,
+            info.rcMonitor.Bottom - info.rcMonitor.Top,
+            info.rcWork.Left,
+            info.rcWork.Top,
+            info.rcWork.Right - info.rcWork.Left,
+            info.rcWork.Bottom - info.rcWork.Top));
+        return true;
+    }
 
     /// <summary>
-    /// 枚举**接在桌面上**的显示器（<c>EnumDisplayDevices</c> + 当前显示设置）。
-    /// 用途：<c>DisplayArea</c> 只给一个整数 id，而设置里要存人看得懂、能手改的 <c>\\.\DISPLAYn</c>，
-    /// 两者靠外框原点对上（排列原点与 <c>DisplayArea.OuterBounds</c> 的原点是同一套虚拟桌面坐标）。
-    /// 镜像驱动、未接桌面的适配器会被过滤掉。枚举失败返回空数组。
+    /// 枚举接在桌面上的全部显示器（<c>EnumDisplayMonitors</c> + <c>GetMonitorInfo</c>）。
+    ///
+    /// 这是显示器的唯一真实来源，**不要用 <c>DisplayArea.FindAll()</c>** ——
+    /// 它在多屏机器上遍历会抛 <c>InvalidCastException</c>（microsoft-ui-xaml#6454）：
+    /// 旧实现把异常当"没有显示器"吞掉，于是所有多屏用户都看到「只检测到一块显示器」。
+    /// <c>DisplayArea</c> 只能在已知某块屏时用于"这块屏的几何"（落点、DPI），不能用来枚举。
+    /// 返回顺序：主屏最前，其余按排列坐标从左到右、从上到下。
     /// </summary>
-    public static IReadOnlyList<DisplayDevice> EnumerateDisplayDevices()
+    public static MonitorInfo[] EnumerateMonitors()
     {
-        var result = new List<DisplayDevice>(2);
-        var device = NewDisplayDevice();
-
-        for (uint i = 0; EnumDisplayDevices(null, i, ref device, 0); i++)
+        var buffer = _monitorBuffer ??= new List<MonitorInfo>(4);
+        buffer.Clear();
+        try
         {
-            var current = device;
-            // 结构体是复用的：读走本轮结果后立刻清空字符串字段，否则下一轮会读到上一轮的值
-            device = NewDisplayDevice();
-
-            if ((current.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) == 0) continue;
-            if ((current.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER) != 0) continue;
-
-            var mode = new DEVMODE { dmSize = (ushort)Marshal.SizeOf<DEVMODE>() };
-            if (!EnumDisplaySettings(current.DeviceName, ENUM_CURRENT_SETTINGS, ref mode)) continue;
-
-            result.Add(new DisplayDevice(
-                current.DeviceName,
-                current.DeviceString,
-                (current.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE) != 0,
-                new POINT { X = mode.dmPositionX, Y = mode.dmPositionY }));
+            if (!EnumDisplayMonitors(nint.Zero, nint.Zero, _monitorEnumProc, nint.Zero))
+                return Array.Empty<MonitorInfo>();
+        }
+        catch
+        {
+            return Array.Empty<MonitorInfo>();
         }
 
-        return result;
+        return MonitorLayout.Sort(buffer);
+    }
 
-        static DISPLAY_DEVICE NewDisplayDevice() => new()
-        {
-            cb = (uint)Marshal.SizeOf<DISPLAY_DEVICE>(),
-            DeviceName = string.Empty,
-            DeviceString = string.Empty,
-            DeviceID = string.Empty,
-            DeviceKey = string.Empty,
-        };
+    /// <summary>离指定矩形最近（或重叠最多）的显示器。取不到时返回 null。</summary>
+    public static MonitorInfo? MonitorFromRect(Win32.RECT rect)
+        => MonitorLayout.BestFit(EnumerateMonitors(), rect.Left, rect.Top,
+            rect.Right - rect.Left, rect.Bottom - rect.Top);
+
+    /// <summary>包含指定点的显示器；点落在死区时取最近的一块。取不到时返回 null。</summary>
+    public static MonitorInfo? MonitorAt(int x, int y)
+    {
+        var monitors = EnumerateMonitors();
+        return MonitorLayout.At(monitors, x, y) ?? MonitorLayout.Nearest(monitors, x, y);
     }
 
     [LibraryImport("user32.dll", SetLastError = true)]
@@ -895,6 +874,14 @@ internal static partial class Win32
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool GetWindowRect(nint hWnd, out RECT lpRect);
+
+    /// <summary>窗口在屏幕上的矩形（物理像素）。取不到返回 false 并把 <paramref name="rect"/> 清零。</summary>
+    public static bool TryGetWindowRect(nint hWnd, out RECT rect)
+    {
+        if (hWnd != nint.Zero && GetWindowRect(hWnd, out rect)) return true;
+        rect = default;
+        return false;
+    }
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
