@@ -333,7 +333,7 @@ public sealed class WeatherService : IDisposable
             DewPoint = Num(payload.Hourly?.DewPoint, hourStart),
             Pressure = current.Pressure,
             CloudCover = current.CloudCover,
-            Visibility = Num(payload.Hourly?.Visibility, hourStart),
+            Visibility = Num(payload.Hourly?.Visibility, hourStart) / 1000.0, // Open-Meteo: metres → kilometres
             WindSpeed = current.WindSpeed,
             WindGust = current.WindGust,
             WindDirection = current.WindDirection,

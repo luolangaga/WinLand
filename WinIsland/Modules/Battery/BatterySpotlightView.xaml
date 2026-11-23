@@ -2,6 +2,7 @@
 <UserControl
     x:Class="WinIsland.Modules.Battery.BatterySpotlightView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:island="using:WinIsland.Island"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -19,15 +20,20 @@
                     <SolidColorBrush x:Key="SpotlightRingTrackBrush" Color="#26FFFFFF" />
                     <SolidColorBrush x:Key="SpotlightDividerBrush" Color="#14FFFFFF" />
                 </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="SpotlightRingTrackBrush" Color="{ThemeResource SystemColorButtonFaceColor}" />
+                    <SolidColorBrush x:Key="SpotlightDividerBrush" Color="{ThemeResource SystemColorButtonFaceColor}" />
+                </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>
     </UserControl.Resources>
 
     <!-- 电池超级展开卡：左侧大进度环 + 右侧高级信息（容量/健康/循环/电压/预计时间）。
          数值都在代码里填，读不到的项显示 "—"。 -->
-    <Grid Padding="28,26,28,22" ColumnSpacing="32">
+    <Grid>
+    <Grid Padding="28,26,28,22" ColumnSpacing="36">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="236" />
+            <ColumnDefinition Width="0.95*" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
@@ -68,12 +74,14 @@
                     VerticalAlignment="Center">
                     <TextBlock
                         HorizontalAlignment="Center"
-                        FontSize="50"
+                        FontSize="48"
                         FontWeight="SemiBold"
                         Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                         Text="{x:Bind ViewModel.PercentText, Mode=OneWay}" />
                 </StackPanel>
             </Grid>
+
+            <island:AmbientBackdrop x:Name="BackgroundScene" Width="228" Height="48" TargetX="0.8" TargetY="0.5" />
 
             <!-- 预计时间放在环下面当主角：充电时说"还有多久充满"，放电时说"还能用多久" -->
             <TextBlock
@@ -104,9 +112,13 @@
         <StackPanel
             x:Name="InfoPanel"
             Grid.Column="1"
-            Opacity="0"
             VerticalAlignment="Center">
-            <Grid Height="38">
+            <TextBlock Text="电池详情" FontSize="11" Margin="0,0,0,12" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+            <Grid Height="42" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <TextBlock
                     x:Name="ValuePowerLabel"
                     VerticalAlignment="Center"
@@ -115,15 +127,20 @@
                     Text="充电功率" />
                 <TextBlock
                     x:Name="ValuePowerText"
+                    Grid.Column="1"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center"
-                    FontSize="15"
+                    FontSize="16"
                     FontWeight="SemiBold"
                     Foreground="#FF6CCB5F"
                     Text="—" />
             </Grid>
             <Border Height="1" Background="{ThemeResource SpotlightDividerBrush}" />
-            <Grid Height="38">
+            <Grid Height="42" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <TextBlock
                     VerticalAlignment="Center"
                     FontSize="13"
@@ -131,15 +148,20 @@
                     Text="剩余容量" />
                 <TextBlock
                     x:Name="ValueRemainingText"
+                    Grid.Column="1"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center"
-                    FontSize="15"
+                    FontSize="16"
                     FontWeight="SemiBold"
                     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Text="—" />
             </Grid>
             <Border Height="1" Background="{ThemeResource SpotlightDividerBrush}" />
-            <Grid Height="38">
+            <Grid Height="42" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <TextBlock
                     VerticalAlignment="Center"
                     FontSize="13"
@@ -147,15 +169,20 @@
                     Text="满充容量" />
                 <TextBlock
                     x:Name="ValueFullText"
+                    Grid.Column="1"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center"
-                    FontSize="15"
+                    FontSize="16"
                     FontWeight="SemiBold"
                     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Text="—" />
             </Grid>
             <Border Height="1" Background="{ThemeResource SpotlightDividerBrush}" />
-            <Grid Height="38">
+            <Grid Height="42" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <TextBlock
                     VerticalAlignment="Center"
                     FontSize="13"
@@ -163,15 +190,20 @@
                     Text="设计容量" />
                 <TextBlock
                     x:Name="ValueDesignText"
+                    Grid.Column="1"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center"
-                    FontSize="15"
+                    FontSize="16"
                     FontWeight="SemiBold"
                     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Text="—" />
             </Grid>
             <Border Height="1" Background="{ThemeResource SpotlightDividerBrush}" />
-            <Grid Height="38">
+            <Grid Height="42" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <TextBlock
                     VerticalAlignment="Center"
                     FontSize="13"
@@ -179,15 +211,20 @@
                     Text="电池健康" />
                 <TextBlock
                     x:Name="ValueHealthText"
+                    Grid.Column="1"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center"
-                    FontSize="15"
+                    FontSize="16"
                     FontWeight="SemiBold"
                     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Text="—" />
             </Grid>
             <Border Height="1" Background="{ThemeResource SpotlightDividerBrush}" />
-            <Grid Height="38">
+            <Grid Height="42" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <TextBlock
                     VerticalAlignment="Center"
                     FontSize="13"
@@ -195,15 +232,20 @@
                     Text="循环次数" />
                 <TextBlock
                     x:Name="ValueCycleText"
+                    Grid.Column="1"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center"
-                    FontSize="15"
+                    FontSize="16"
                     FontWeight="SemiBold"
                     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Text="—" />
             </Grid>
             <Border Height="1" Background="{ThemeResource SpotlightDividerBrush}" />
-            <Grid Height="38">
+            <Grid Height="42" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <TextBlock
                     VerticalAlignment="Center"
                     FontSize="13"
@@ -211,15 +253,20 @@
                     Text="电池电压" />
                 <TextBlock
                     x:Name="ValueVoltageText"
+                    Grid.Column="1"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center"
-                    FontSize="15"
+                    FontSize="16"
                     FontWeight="SemiBold"
                     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Text="—" />
             </Grid>
             <Border Height="1" Background="{ThemeResource SpotlightDividerBrush}" />
-            <Grid Height="38">
+            <Grid Height="42" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <TextBlock
                     x:Name="ValueTimeLabel"
                     VerticalAlignment="Center"
@@ -228,13 +275,15 @@
                     Text="预计充满" />
                 <TextBlock
                     x:Name="ValueTimeText"
+                    Grid.Column="1"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center"
-                    FontSize="15"
+                    FontSize="16"
                     FontWeight="SemiBold"
                     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Text="—" />
             </Grid>
         </StackPanel>
+    </Grid>
     </Grid>
 </UserControl>

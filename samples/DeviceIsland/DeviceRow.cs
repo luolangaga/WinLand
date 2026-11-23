@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using WinIsland.Core;
+using WinIsland.PluginViews;
 
 namespace DeviceIsland;
 
@@ -43,7 +44,7 @@ internal sealed class DeviceRow : UserControl
         var glyphSize = dense ? 18d : 22d;
         var nameSize = dense ? 12d : 13.5;
         var detailSize = dense ? 10.5 : 11.5;
-        var padding = dense ? new Thickness(4, 2, 4, 2) : new Thickness(8, 5, 8, 5);
+        var padding = dense ? new Thickness(6, 3, 6, 3) : new Thickness(12, 10, 12, 10);
 
         var glyph = new FontIcon
         {
@@ -81,7 +82,10 @@ internal sealed class DeviceRow : UserControl
             Foreground = _detailBrush,
         };
 
-        // 副标题 +（有的话）电量 —— 横着排在名称右侧、动作按钮左侧
+        // 设备说明放在名称下面，避免长型号挤掉设备名称与操作按钮。
+        var identity = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
+        identity.Children.Add(name);
+        if (!dense) identity.Children.Add(detail);
         var trailing = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -89,7 +93,6 @@ internal sealed class DeviceRow : UserControl
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(8, 0, 0, 0),
         };
-        trailing.Children.Add(detail);
 
         if (device.BatteryPercent is int batteryPercent)
         {
@@ -120,8 +123,8 @@ internal sealed class DeviceRow : UserControl
 
         grid.Children.Add(leading);
 
-        Grid.SetColumn(name, 1);
-        grid.Children.Add(name);
+        Grid.SetColumn(identity, 1);
+        grid.Children.Add(identity);
 
         Grid.SetColumn(trailing, 2);
         grid.Children.Add(trailing);
@@ -129,16 +132,21 @@ internal sealed class DeviceRow : UserControl
         Grid.SetColumn(actions, 3);
         grid.Children.Add(actions);
 
+        var highlight = new Border { Background = _hoverBrush, CornerRadius = new CornerRadius(8), IsHitTestVisible = false };
+        Motion.Visual(highlight).Opacity = 0;
+        var layers = new Grid();
+        layers.Children.Add(highlight);
+        var padded = new Border { Padding = padding, Child = grid };
+        layers.Children.Add(padded);
         var frame = new Border
         {
             CornerRadius = new CornerRadius(6),
-            Padding = padding,
             Background = TransparentBrush,   // 非 null 才参与命中测试（否则鼠标悬浮事件不触发）
-            Child = grid,
+            Child = layers,
         };
 
-        frame.PointerEntered += (_, _) => frame.Background = _hoverBrush;
-        frame.PointerExited += (_, _) => frame.Background = TransparentBrush;
+        frame.PointerEntered += (_, _) => Motion.Scalar(Motion.Visual(highlight), "Opacity", 1, 140);
+        frame.PointerExited += (_, _) => Motion.Scalar(Motion.Visual(highlight), "Opacity", 0, 160);
 
         Content = frame;
     }
@@ -249,6 +257,7 @@ internal sealed class DeviceRow : UserControl
             VerticalAlignment = VerticalAlignment.Center,
         };
         button.Click += (_, _) => action(device);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, text + " " + device.Name);
         return button;
     }
 }

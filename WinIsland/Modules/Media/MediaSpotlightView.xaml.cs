@@ -3,346 +3,244 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
-using Microsoft.UI.Xaml.Shapes;
+using Microsoft.UI.Xaml.Hosting;
+using Microsoft.UI.Composition;
+using System.Numerics;
 using Windows.Foundation;
 using WinIsland.Core;
+using WinIsland.Island;
 
 namespace WinIsland.Modules.Media;
 
-/// <summary>
-/// 音乐的「超级展开」聚光卡：大封面 + 逐行高亮滚动的歌词流 + 可拖动进度与播控。
-/// 这是独立于岛视图的第二棵可视树（给覆盖窗用），生命周期跟着 Loaded/Unloaded 走 ——
-/// 宿主收起卡片时会把内容卸下，这里随之停表、取消歌词请求。
-/// </summary>
 public sealed partial class MediaSpotlightView : UserControl
 {
-    /// <summary>每行歌词占的高度（固定值：长栈滚动靠平移，行高必须恒定）。</summary>
-    private const double LinePitch = 52;
-    /// <summary>当前行两侧各显示几行（共 5 行可见）。</summary>
-    private const int VisibleRadius = 2;
-    private static readonly double[] EmphasisByDistance = { 1.0, 0.5, 0.26 };
-
+    private const double LinePitch = 64;
     private readonly LyricsService? _lyrics;
     private readonly AudioLevelMonitor? _levels;
     private readonly IIslandTheme _theme;
-    private readonly List<TextBlock> _lines = new();
-    private readonly Rectangle[] _bars;
-
+    private readonly List<TextBlock> _lines = [];
     private DispatcherQueueTimer? _tick;
     private CancellationTokenSource? _lyricsCts;
     private string? _lyricsKey;
     private IReadOnlyList<LyricLine>? _lyricLines;
     private int _lineIndex = -1;
-    private double _shiftY;
-    private Storyboard? _scrollStoryboard;
-    private bool _dragging;
+    private bool _manualLyrics, _waiting, _dragging;
+    private readonly ProgressMotion _progressMotion;
+    private readonly System.Diagnostics.Stopwatch _timelineClock = new();
 
     internal MediaSpotlightView(MediaViewModel viewModel, LyricsService? lyrics, AudioLevelMonitor? levels, IIslandTheme theme)
     {
-        ViewModel = viewModel;
-        _lyrics = lyrics;
-        _levels = levels;
-        _theme = theme;
+        ViewModel = viewModel; _lyrics = lyrics; _levels = levels; _theme = theme;
         InitializeComponent();
-
-        // 歌词行是代码建的，颜色烘在画刷里：主题一变就重刷一遍。
-        // 视图活得跟插件一样久，主题对象也是，所以这里不需要退订。
-        _theme.Changed += OnThemeChanged;
-
-        _bars = new[] { EqBar0, EqBar1, EqBar2, EqBar3, EqBar4 };
-
+        _progressMotion = new ProgressMotion(ProgressFill, ProgressKnob);
+        ElementCompositionPreview.SetIsTranslationEnabled(LyricsStack, true);
+        Motion.Visual(LyricsStack).Properties.InsertVector3("Translation", Vector3.Zero);
         LyricsViewport.SizeChanged += (_, e) =>
         {
             LyricsViewport.Clip = new RectangleGeometry { Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height) };
-            UpdateProgressVisual();
+            if (!_manualLyrics && _lineIndex >= 0) MoveToLine(_lineIndex, false);
         };
-
-        Loaded += (_, _) => StartTick();
-        Unloaded += (_, _) => StopTick();
+        ProgressArea.SizeChanged += (_, _) => UpdateProgressVisual();
+        Loaded += (_, _) => { _theme.Changed += OnThemeChanged; ViewModel.PropertyChanged += OnViewModelChanged; OnThemeChanged(); StartTick(); };
+        Unloaded += (_, _) => { _theme.Changed -= OnThemeChanged; ViewModel.PropertyChanged -= OnViewModelChanged; OnHostClosed(); };
     }
 
     public MediaViewModel ViewModel { get; }
-
-    /// <summary>
-    /// 歌词行的中性色：跟着岛体主题走 —— 浅色卡片（Fluent + 浅色系统）上再用白字就等于没写。
-    /// 明暗两档与宿主的次级文字同一档。
-    /// </summary>
     private Brush LyricBrush => new SolidColorBrush(_theme.IsLight
-        ? Windows.UI.Color.FromArgb(255, 28, 28, 30)
-        : Microsoft.UI.Colors.White);
-
-    private void OnThemeChanged()
+        ? Windows.UI.Color.FromArgb(255, 28, 28, 30) : Microsoft.UI.Colors.White);
+    private void OnThemeChanged() { foreach (var line in _lines) line.Foreground = LyricBrush; }
+    private void OnViewModelChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        foreach (var line in _lines)
-        {
-            line.Foreground = LyricBrush;
-        }
+        if (e.PropertyName == nameof(MediaViewModel.HasProgress)) ConfigureLyricsMode();
+        if (e.PropertyName == nameof(MediaViewModel.LyricsEnabled)) _lyricsKey = null;
     }
 
-    /// <summary>宿主收起卡片时调用：停表并取消还没回来的歌词请求。</summary>
     public void OnHostClosed()
     {
-        StopTick();
-        CancelLyrics();
-        // 关闭时可能正好打断了取词请求：清掉键值，下次打开重新取
-        _lyricsKey = null;
+        _tick?.Stop(); _timelineClock.Stop(); CancelLyrics(); _lyricsKey = null;
+        StopWaiting();
+        Motion.Visual(LyricsStack).StopAnimation("Translation");
+        foreach (var line in _lines) { Motion.Visual(line).StopAnimation("Scale"); Motion.Visual(line).StopAnimation("Opacity"); }
+        BackgroundScene.Configure(ViewModel.BackgroundMode, ViewModel.BackgroundIntensity, false);
     }
-
-    // ---- 定时刷新：进度 / 歌词行 / 音浪 ----
 
     private void StartTick()
     {
         if (_tick == null)
         {
-            _tick = DispatcherQueue.CreateTimer();
-            _tick.Interval = TimeSpan.FromMilliseconds(90);
-            _tick.IsRepeating = true;
+            _tick = DispatcherQueue.CreateTimer(); _tick.Interval = TimeSpan.FromMilliseconds(33);
             _tick.Tick += (_, _) => OnTick();
         }
-
-        _tick.Start();
+        _timelineClock.Restart(); ViewModel.RefreshTimeline?.Invoke(); _tick.Start(); OnTick();
     }
-
-    private void StopTick() => _tick?.Stop();
-
     private void OnTick()
     {
-        UpdateProgressVisual();
-        UpdateLyrics();
-        UpdateEqualizer();
+        if (ViewModel.IsPlaying && _timelineClock.ElapsedMilliseconds >= 250)
+        { ViewModel.RefreshTimeline?.Invoke(); _timelineClock.Restart(); }
+        UpdateProgressVisual(); UpdateLyrics();
+        BackgroundScene.Configure(ViewModel.BackgroundMode, ViewModel.BackgroundIntensity, ViewModel.IsPlaying && ViewModel.GlowEnabled);
+        #if DEBUG
+        if (_previewAudio is { } sample) BackgroundScene.SetAudio(sample.X, sample.Y, sample.Z);
+        else
+#endif
+            BackgroundScene.SetAudio(_levels?.Bass ?? 0, _levels?.Mid ?? 0, _levels?.Treble ?? 0);
     }
-
-    // ---- 歌词 ----
 
     private async void UpdateLyrics()
     {
         if (!ViewModel.LyricsEnabled)
         {
-            ResetLyrics();
-            ShowFallback(_lyrics == null ? "未找到歌词" : "歌词已关闭");
-            return;
+            if (_lyricLines != null) ResetLyrics();
+            ShowFallback("歌词已关闭"); return;
         }
-
         var key = $"{ViewModel.Title}\u0001{ViewModel.Artist}";
         if (key != _lyricsKey)
         {
-            _lyricsKey = key;
-            ResetLyrics();
-
-            if (string.IsNullOrWhiteSpace(ViewModel.Title))
-            {
-                ShowFallback("暂无播放内容");
-                return;
-            }
-
-            ShowFallback(_lyrics == null ? "未找到歌词" : "正在获取歌词…");
-            if (_lyrics == null) return;
-
-            _lyricsCts = new CancellationTokenSource();
-            var token = _lyricsCts.Token;
+            _lyricsKey = key; ResetLyrics();
+            if (string.IsNullOrWhiteSpace(ViewModel.Title)) { ShowFallback("暂无播放内容"); return; }
+            if (_lyrics == null) { ShowFallback("这应该不是歌曲。"); return; }
+            ShowFallback("正在寻找歌词", true);
+            _lyricsCts = new CancellationTokenSource(); var token = _lyricsCts.Token;
             try
             {
                 var lines = await _lyrics.FetchAsync(ViewModel.Title, ViewModel.Artist, ViewModel.Duration, token);
-                if (token.IsCancellationRequested || key != _lyricsKey) return;
-
-                if (lines is { Count: > 0 })
-                {
-                    BuildLyrics(lines);
-                }
-                else
-                {
-                    ShowFallback("未找到歌词");
-                }
+                if (token.IsCancellationRequested || key != _lyricsKey || !IsLoaded) return;
+                if (lines is { Count: > 0 }) BuildLyrics(lines); else ShowFallback("这应该不是歌曲。");
             }
-            catch
-            {
-                ShowFallback("未找到歌词");
-            }
+            catch (OperationCanceledException) { return; }
+            catch { if (!token.IsCancellationRequested && key == _lyricsKey && IsLoaded) ShowFallback("这应该不是歌曲。"); }
         }
-
         if (_lyricLines is not { Count: > 0 }) return;
-
-        var index = FindLine(_lyricLines, ViewModel.Position);
+        if (_manualLyrics) return;
+        int index = FindLine(_lyricLines, ViewModel.Position);
+        if (index < 0) { ShowFallback("前奏", true); return; }
+        ShowLyrics();
         if (index != _lineIndex) MoveToLine(index);
     }
 
     private static int FindLine(IReadOnlyList<LyricLine> lines, TimeSpan position)
     {
-        int index = 0;
-        for (int i = 0; i < lines.Count; i++)
-        {
-            if (lines[i].Time > position) break;
-            index = i;
-        }
-
+        int index = -1;
+        for (int i = 0; i < lines.Count && lines[i].Time <= position; i++) index = i;
         return index;
     }
-
     private void BuildLyrics(IReadOnlyList<LyricLine> lines)
     {
-        _lyricLines = lines;
-        _lineIndex = -1;
-        _shiftY = 0;
-        _scrollStoryboard?.Stop();
-        _scrollStoryboard = null;
-        LyricsShift.Y = 0;
-
-        _lines.Clear();
-        LyricsStack.Children.Clear();
+        _lyricLines = lines; _lineIndex = -1;
+        _lines.Clear(); LyricsStack.Children.Clear();
         foreach (var line in lines)
         {
-            var block = new TextBlock
-            {
-                Text = line.Text,
-                Height = LinePitch,
-                FontSize = 16,
-                FontWeight = Microsoft.UI.Text.FontWeights.Normal,
-                Foreground = LyricBrush,
-                MaxLines = 2,
-                Opacity = 0,
-                TextAlignment = TextAlignment.Left,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                TextWrapping = TextWrapping.Wrap,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            _lines.Add(block);
-            LyricsStack.Children.Add(block);
+            var block = new TextBlock { Text = line.Text, Height = LinePitch, FontSize = 21,
+                FontFamily = new FontFamily("Segoe UI Variable Display"), FontWeight = Microsoft.UI.Text.FontWeights.Normal,
+                Foreground = LyricBrush, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis,
+                TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+            _lines.Add(block); LyricsStack.Children.Add(block);
         }
+        ConfigureLyricsMode();
+        if (!_manualLyrics)
+        {
+            var index = FindLine(lines, ViewModel.Position);
+            if (index < 0) ShowFallback("前奏", true); else { ShowLyrics(); MoveToLine(index, false); }
+        }
+    }
 
-        LyricsViewport.Visibility = Visibility.Visible;
-        LyricsFallback.Visibility = Visibility.Collapsed;
-        MoveToLine(FindLine(lines, ViewModel.Position), animate: false);
+    private void ConfigureLyricsMode()
+    {
+        bool manual = !ViewModel.HasProgress || _lyricLines?.All(l => l.Time < TimeSpan.Zero) == true;
+        bool changed = manual != _manualLyrics;
+        _manualLyrics = manual;
+        LyricsHint.Text = !ViewModel.HasProgress ? "此媒体不支持播放进度，歌词可自由滚动。" : "此歌词没有时间轴，可自由滚动。";
+        LyricsHint.Visibility = manual ? Visibility.Visible : Visibility.Collapsed;
+        LyricsScroller.VerticalScrollMode = manual ? ScrollMode.Enabled : ScrollMode.Disabled;
+        LyricsScroller.VerticalScrollBarVisibility = manual ? ScrollBarVisibility.Auto : ScrollBarVisibility.Hidden;
+        LyricsScroller.IsTabStop = manual;
+        if (_lyricLines == null) return;
+        if (changed) { LyricsScroller.ChangeView(null, 0, null, true); _lineIndex = -1; }
+        if (manual)
+        {
+            var pose = Motion.Visual(LyricsStack); pose.StopAnimation("Translation"); pose.Properties.InsertVector3("Translation", Vector3.Zero);
+            foreach (var line in _lines)
+            {
+                var visual = Motion.Visual(line); visual.StopAnimation("Opacity"); visual.StopAnimation("Scale");
+                visual.Opacity = 1; visual.Scale = Vector3.One; line.FontWeight = Microsoft.UI.Text.FontWeights.Normal;
+            }
+            ShowLyrics();
+        }
     }
 
     private void MoveToLine(int index, bool animate = true)
     {
-        int previous = _lineIndex;
-        _lineIndex = index;
-
+        int previous = _lineIndex; _lineIndex = index;
+        // Only nearby rows need compositor animations, even for very long songs.
         for (int i = 0; i < _lines.Count; i++)
         {
             int distance = Math.Abs(i - index);
-            if (distance > VisibleRadius)
-            {
-                if (_lines[i].Opacity > 0) _lines[i].Opacity = 0;
-                continue;
-            }
-
-            _lines[i].FontSize = distance == 0 ? 20 : 16;
+            var visual = Motion.Visual(_lines[i]);
+            float opacity = distance switch { 0 => 1, 1 => .48f, 2 => .22f, 3 => .08f, _ => 0 };
+            float scale = distance == 0 ? 1.035f : .96f;
             _lines[i].FontWeight = distance == 0 ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
-            FadeTo(_lines[i], EmphasisByDistance[distance]);
+            if (distance > 3 && (previous < 0 || Math.Abs(i - previous) > 3)) { visual.Opacity = 0; continue; }
+            if (animate && previous >= 0)
+            { Motion.Scalar(visual, "Opacity", opacity, 440); Motion.Vector(visual, "Scale", new Vector3(scale, scale, 1), 540); }
+            else { visual.StopAnimation("Opacity"); visual.StopAnimation("Scale"); visual.Opacity = opacity; visual.Scale = new Vector3(scale, scale, 1); }
         }
-
-        // 当前行停在第 3 行（视口内半径 2），整条歌词栈靠平移滚动
-        AnimateScroll(-(index - VisibleRadius) * LinePitch, animate && previous >= 0);
+        float target = (float)((LyricsViewport.ActualHeight - LinePitch) / 2 - index * LinePitch);
+        var stack = Motion.Visual(LyricsStack);
+        if (animate && previous >= 0 && Motion.Enabled)
+        {
+            using var scroll = stack.Compositor.CreateVector3KeyFrameAnimation();
+            scroll.Duration = TimeSpan.FromMilliseconds(680);
+            scroll.InsertExpressionKeyFrame(0, "this.StartingValue");
+            scroll.InsertKeyFrame(1, new Vector3(0, target, 0), stack.Compositor.CreateCubicBezierEasingFunction(new Vector2(.16f, 1), new Vector2(.3f, 1)));
+            stack.StartAnimation("Translation", scroll);
+        }
+        else { stack.StopAnimation("Translation"); stack.Properties.InsertVector3("Translation", new Vector3(0, target, 0)); }
     }
-
     private void ResetLyrics()
     {
-        CancelLyrics();
-        _lyricLines = null;
-        _lines.Clear();
-        LyricsStack.Children.Clear();
-        _lineIndex = -1;
-        _shiftY = 0;
-        _scrollStoryboard?.Stop();
-        _scrollStoryboard = null;
-        LyricsShift.Y = 0;
+        CancelLyrics(); _lyricLines = null; _lineIndex = -1; _lines.Clear(); LyricsStack.Children.Clear();
+        var pose = Motion.Visual(LyricsStack); pose.StopAnimation("Translation"); pose.Properties.InsertVector3("Translation", Vector3.Zero);
+        ConfigureLyricsMode();
     }
-
-    private void CancelLyrics()
+    private void CancelLyrics() { _lyricsCts?.Cancel(); _lyricsCts?.Dispose(); _lyricsCts = null; }
+    private void ShowLyrics() { StopWaiting(); LyricsViewport.Visibility = Visibility.Visible; LyricsFallback.Visibility = Visibility.Collapsed; }
+    private void ShowFallback(string message, bool waiting = false)
     {
-        _lyricsCts?.Cancel();
-        _lyricsCts?.Dispose();
-        _lyricsCts = null;
+        LyricsStatus.Text = message; LyricsFallback.Visibility = Visibility.Visible; LyricsViewport.Visibility = Visibility.Collapsed;
+        WaitingDots.Visibility = waiting ? Visibility.Visible : Visibility.Collapsed;
+        if (waiting && !_waiting) StartWaiting(); else if (!waiting) StopWaiting();
     }
-
-    private void ShowFallback(string message)
+    private void StartWaiting()
     {
-        LyricsFallback.Visibility = Visibility.Visible;
-        LyricsViewport.Visibility = Visibility.Collapsed;
-        LyricsStatus.Text = message;
-    }
-
-    private void AnimateScroll(double target, bool animate)
-    {
-        if (!animate)
+        _waiting = true;
+        var dots = new[] { WaitDot0, WaitDot1, WaitDot2 };
+        for (int i = 0; i < dots.Length; i++)
         {
-            _scrollStoryboard?.Stop();
-            _scrollStoryboard = null;
-            _shiftY = target;
-            LyricsShift.Y = target;
-            return;
+            var visual = Motion.Visual(dots[i]);
+            if (!Motion.Enabled) { visual.Opacity = .6f; continue; }
+            using var pulse = visual.Compositor.CreateScalarKeyFrameAnimation();
+            pulse.Duration = TimeSpan.FromMilliseconds(1200); pulse.DelayTime = TimeSpan.FromMilliseconds(i * 160);
+            pulse.IterationBehavior = AnimationIterationBehavior.Forever;
+            pulse.InsertKeyFrame(0, .18f); pulse.InsertKeyFrame(.4f, 1, Motion.Ease(visual.Compositor)); pulse.InsertKeyFrame(1, .18f, Motion.Ease(visual.Compositor));
+            visual.StartAnimation("Opacity", pulse);
         }
-
-        var animation = new DoubleAnimation
-        {
-            From = _shiftY,
-            To = target,
-            Duration = new Duration(TimeSpan.FromSeconds(Math.Min(0.65, 0.22 + Math.Abs(target - _shiftY) / 420))),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut },
-        };
-        Storyboard.SetTarget(animation, LyricsShift);
-        Storyboard.SetTargetProperty(animation, "Y");
-
-        var storyboard = new Storyboard();
-        storyboard.Children.Add(animation);
-        _scrollStoryboard = storyboard;
-        _shiftY = target;
-        storyboard.Begin();
     }
-
-    /// <summary>
-    /// 歌词行淡到目标不透明度。先把基值写成目标值，动画用 FillBehavior.Stop ——
-    /// 动画结束那刻基值正好接管，既没有跳变，也不会留下"动画保持"挡住后续赋值。
-    /// </summary>
-    private static void FadeTo(UIElement element, double target)
+    private void StopWaiting()
     {
-        var from = element.Opacity;
-        if (Math.Abs(from - target) < 0.001) return;
-
-        element.Opacity = target;
-
-        var animation = new DoubleAnimation
-        {
-            From = from,
-            To = target,
-            Duration = new Duration(TimeSpan.FromMilliseconds(240)),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-            FillBehavior = FillBehavior.Stop,
-        };
-        Storyboard.SetTarget(animation, element);
-        Storyboard.SetTargetProperty(animation, "Opacity");
-
-        var storyboard = new Storyboard();
-        storyboard.Children.Add(animation);
-        storyboard.Begin();
+        if (!_waiting) return;
+        _waiting = false;
+        foreach (var dot in new[] { WaitDot0, WaitDot1, WaitDot2 }) { Motion.Visual(dot).StopAnimation("Opacity"); Motion.Visual(dot).Opacity = .6f; }
     }
-
-    // ---- 无歌词时的音浪 ----
-
-    private void UpdateEqualizer()
+#if DEBUG
+    private Vector3? _previewAudio;
+    internal void PreviewAudio(float bass, float mid, float treble) => _previewAudio = new Vector3(bass, mid, treble);
+    internal void PreviewLyrics(IReadOnlyList<LyricLine>? lines)
     {
-        if (LyricsFallback.Visibility != Visibility.Visible) return;
-
-        bool playing = ViewModel.IsPlaying;
-        float bass = playing ? _levels?.Bass ?? 0f : 0f;
-        float mid = playing ? _levels?.Mid ?? 0f : 0f;
-        float treble = playing ? _levels?.Treble ?? 0f : 0f;
-
-        SetBar(EqBar0, 0.34f + bass * 1.7f);
-        SetBar(EqBar1, 0.30f + mid * 1.6f);
-        SetBar(EqBar2, 0.42f + Math.Max(mid, treble) * 1.5f);
-        SetBar(EqBar3, 0.30f + mid * 1.6f);
-        SetBar(EqBar4, 0.34f + treble * 1.9f);
+        _lyricsKey = $"{ViewModel.Title}\u0001{ViewModel.Artist}";
+        ResetLyrics();
+        if (lines is { Count: > 0 }) BuildLyrics(lines); else ShowFallback("这应该不是歌曲。");
     }
-
-    private void SetBar(Rectangle bar, float level)
-    {
-        double target = Math.Clamp(8 + Math.Clamp(level, 0f, 1f) * 52, 8, 62);
-        bar.Height += (target - bar.Height) * 0.35;     // 每帧向目标靠拢，看上去是连续的律动
-    }
+#endif
 
     // ---- 进度与拖动 ----
 
@@ -357,13 +255,9 @@ public sealed partial class MediaSpotlightView : UserControl
         ProgressKnob.Visibility = ViewModel.HasProgress ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void ApplyRatio(double ratio, double width)
-    {
-        double x = Math.Clamp(ratio, 0, 1) * width;
-        ProgressFill.Width = x;
-        double margin = Math.Clamp(x - ProgressKnob.Width / 2, 0, Math.Max(0, width - ProgressKnob.Width));
-        ProgressKnob.Margin = new Thickness(margin, 0, 0, 0);
-    }
+    private void ApplyRatio(double ratio, double width) =>
+        _progressMotion.Set(ratio, width, _dragging ? 1 : 100);
+
 
     private void ProgressArea_PointerPressed(object sender, PointerRoutedEventArgs e)
     {

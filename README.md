@@ -13,16 +13,23 @@
 [![Platform](https://img.shields.io/badge/Windows-10%201809%2B-0078d6?style=for-the-badge&labelColor=1f2937&logo=windows&logoColor=white)](#系统要求)
 [![.NET](https://img.shields.io/badge/.NET-10-512bd4?style=for-the-badge&labelColor=1f2937&logo=dotnet&logoColor=white)](#从源码构建)
 [![Plugin API](https://img.shields.io/badge/Plugin%20API-v2-8b5cf6?style=for-the-badge&labelColor=1f2937)](#插件开发)
+[![NuGet](https://img.shields.io/nuget/v/luolan.winland.Core?style=for-the-badge&labelColor=1f2937&logo=nuget&logoColor=white)](https://www.nuget.org/packages/luolan.winland.Core)
 
 **一个常驻桌面的悬浮胶囊：平时安静地待在角落，展开就是媒体控制台、充电与硬件看板。**
 
 所有内容都由可热插拔的插件提供，并配有社区插件市场。
+
+[下载](https://github.com/luolangaga/WinLand/releases/latest) | [反馈](https://github.com/luolangaga/WinLand/issues) | [插件开发](#插件开发) | [插件市场](https://github.com/luolangaga/WinLandPlugin) | [NuGet SDK](https://www.nuget.org/packages/luolan.winland.Core)
 
 </div>
 
 > **想给灵动岛加个功能，但不会写代码？** 把 [**WinLandPluginSkills**](https://github.com/luolangaga/WinLandPluginSkills)
 > 技能装进你的 AI 助手（Claude Code / Command Code 等），然后用中文说一句需求——它会带你从零做到上架插件市场。
 > 见 [插件开发 → 路线 A](#路线-a让-ai-帮你做不会编程也能用)。
+
+> [!WARNING]
+> 请仅通过本文档「[安装](#安装)」列出的官方渠道下载（GitHub Releases 或 GitCode 镜像），
+> 不要使用来源不明的第三方下载站或被二次打包的安装包。
 
 ---
 
@@ -49,10 +56,16 @@
 ### 功能亮点
 
 * **两种形态** —— 紧凑胶囊 ↔ 悬停展开（主岛 + 3 张队列卡片单列排布，更多活动靠末尾的圆形按钮逐张翻看），展开/收起带形变动画
+* **岛体右键菜单** —— 打开设置 / 静默一段时间 / 隐藏岛 / 取消当前活动 / 复制当前内容；中键单击关消息、Alt+左键或中键拖动可直接把岛拖到任意位置并记住
+* **全局快捷键** —— 唤起/收起岛（默认 `Ctrl+Alt+I`）、播放暂停（`Ctrl+Alt+P`）、勿扰；组合键可改，被占用时自动跳过
+* **命令行与链接** —— `WinIsland.exe --notify "标题" "正文"`、`winisland://notify?...`、`--quiet 30`、`--settings`：脚本、CI、其它程序都能往岛上推消息（单实例自动转交，不会多开）
+* **勿扰与消息历史** —— 静默期内只记录不打扰；岛上的消息保留最近 200 条，随时在「设置 → 自动化」翻看
+* **安全模式** —— 连续 3 次启动没跑完就自动只加载内置插件，并在设置里给出一键退出
 * **文件投放** —— 把文件/文件夹、文本、图片拖到岛上：岛展开成一排投放卡片（拖到两端自动滚动、悬停放大、系统气泡提示「投放到 XXX」，摘要按载荷显示文件名 / 文本预览 / 图片缩略图），松手即执行；卡片可由插件注册
 * **两种外观** —— Apple 纯黑胶囊，或带系统材质（Acrylic / Mica）的 Windows Fluent
 * **两种摆放** —— 贴屏幕顶部悬浮，或真·嵌进任务栏条带（自动避开任务栏图标、跟随自动隐藏、被压住时自愈置顶）
 * **插件系统 v2** —— 依赖隔离、热插拔、超时与异常防护、注册项全部回收
+* **多实例内容（SDK 2.6）** —— 同一个插件可以同时挂多张卡（两个城市天气、两块 GPU 各一张）；插件间事件总线让天气、媒体、硬件能互相订阅
 * **AI 友好** —— 配套 [`winland-plugin-maker`](https://github.com/luolangaga/WinLandPluginSkills) 技能：用中文说一句需求，
   就能让 AI 从零写出插件、装进你正在用的 WinIsland 实测，并投稿上架市场（全程不用懂编程）
 * **插件市场** —— 整表一次请求、多镜像回退、安装前强制校验 SHA-256
@@ -349,6 +362,7 @@ installer/WinIsland.iss   Inno Setup 安装脚本（每用户安装，无需管�
 * 社区插件仓库：[luolangaga/WinLandPlugin](https://github.com/luolangaga/WinLandPlugin)
 * 问题反馈：[Issues](https://github.com/luolangaga/WinLand/issues)
 * 下载：[Releases](https://github.com/luolangaga/WinLand/releases)
+* 插件 SDK：[NuGet `luolan.winland.Core`](https://www.nuget.org/packages/luolan.winland.Core)
 
 <div align="center">
   <sub>WinUI 3 · .NET 10 · Windows App SDK 2.3 · 插件 API v2</sub>

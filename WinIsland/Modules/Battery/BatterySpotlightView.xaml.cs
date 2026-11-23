@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using WinIsland.Core;
+using WinIsland.Island;
 
 namespace WinIsland.Modules.Battery;
 
@@ -17,9 +18,12 @@ public sealed partial class BatterySpotlightView : UserControl
 {
     private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(1);
 
-    private static readonly Windows.UI.Color ChargingColor = Windows.UI.Color.FromArgb(0xFF, 0x6C, 0xCB, 0x5F);
-    private static readonly Windows.UI.Color WarningColor = Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xA6, 0x23);
-    private static readonly Windows.UI.Color DangerColor = Windows.UI.Color.FromArgb(0xFF, 0xE8, 0x4D, 0x3D);
+    private Windows.UI.Color ChargingColor => _theme.IsLight
+        ? Windows.UI.Color.FromArgb(255, 0x23, 0x78, 0x32) : Windows.UI.Color.FromArgb(255, 0x6C, 0xCB, 0x5F);
+    private Windows.UI.Color WarningColor => _theme.IsLight
+        ? Windows.UI.Color.FromArgb(255, 0x9C, 0x5D, 0) : Windows.UI.Color.FromArgb(255, 0xF5, 0xA6, 0x23);
+    private Windows.UI.Color DangerColor => _theme.IsLight
+        ? Windows.UI.Color.FromArgb(255, 0xC4, 0x2B, 0x1C) : Windows.UI.Color.FromArgb(255, 0xE8, 0x4D, 0x3D);
 
     private DispatcherQueueTimer? _tick;
     private BatteryPowerInfo _info;
@@ -31,11 +35,14 @@ public sealed partial class BatterySpotlightView : UserControl
         ViewModel = viewModel;
         _theme = theme;
         InitializeComponent();
+        _theme.Changed += () => { if (IsLoaded) UpdateValues(); };
 
+        ViewModel.PropertyChanged += (_, _) => { if (IsLoaded) SyncBackground(); };
         Loaded += (_, _) =>
         {
+            SyncBackground();
             StartTick();
-            FadeIn();
+            OnTick();
         };
         Unloaded += (_, _) => StopTick();
     }
@@ -64,7 +71,10 @@ public sealed partial class BatterySpotlightView : UserControl
         _tick.Start();
     }
 
-    private void StopTick() => _tick?.Stop();
+    private void StopTick() { _tick?.Stop(); BackgroundScene.Configure(ViewModel.BackgroundMode, ViewModel.BackgroundIntensity, false, charging: true); }
+
+    private void SyncBackground() => BackgroundScene.Configure(ViewModel.BackgroundMode, ViewModel.BackgroundIntensity,
+        IsLoaded && ViewModel.IsCharging && ViewModel.GlowEnabled, charging: true, watts: ViewModel.ChargePower);
 
     private void OnTick()
     {
@@ -190,24 +200,4 @@ public sealed partial class BatterySpotlightView : UserControl
         StatusPill.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, color.R, color.G, color.B));
     }
 
-    /// <summary>信息区淡入：与卡片的飞入动画一起，读数据的那一拍不会显得突兀。</summary>
-    private void FadeIn()
-    {
-        InfoPanel.Opacity = 1;
-
-        var animation = new DoubleAnimation
-        {
-            From = 0,
-            To = 1,
-            Duration = new Duration(TimeSpan.FromMilliseconds(280)),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-            FillBehavior = FillBehavior.Stop,
-        };
-        Storyboard.SetTarget(animation, InfoPanel);
-        Storyboard.SetTargetProperty(animation, "Opacity");
-
-        var storyboard = new Storyboard();
-        storyboard.Children.Add(animation);
-        storyboard.Begin();
-    }
 }

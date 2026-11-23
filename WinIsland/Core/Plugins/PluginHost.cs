@@ -7,16 +7,19 @@ namespace WinIsland.Core.Plugins;
 public sealed class PluginHost
 {
     private readonly List<PluginInstance> _instances = new();
+    private readonly SemaphoreSlim _operations = new(1, 1);
+    private bool _shuttingDown;
     private readonly List<(PluginManifest Manifest, Func<IIslandPlugin> Factory)> _builtIns = new();
     private readonly List<string> _discoveryWarnings = new();
 
-    public PluginHost(IslandService island, SettingsService settings, DispatcherQueue dispatcher, PluginLogService? logs = null)
+    public PluginHost(IslandService island, SettingsService settings, DispatcherQueue dispatcher, PluginLogService? logs = null,
+        string? pluginsDirectory = null)
     {
         Island = island;
         Settings = settings;
         Dispatcher = dispatcher;
         Logs = logs ?? new PluginLogService();
-        PluginsDirectory = IslandSdk.GetPluginsDirectory(AppContext.BaseDirectory);
+        PluginsDirectory = pluginsDirectory ?? IslandSdk.GetPluginsDirectory(AppContext.BaseDirectory);
 
         // 岛体生效主题由「外观风格 + 系统明暗」两处决定，两个来源都要盯：
         // 风格切到 Fluent 时即使系统主题没动，岛的明暗也会变，插件得跟着走
@@ -27,6 +30,12 @@ public sealed class PluginHost
     public PluginLogService Logs { get; }
 
     public string PluginsDirectory { get; }
+
+    /// <summary>
+    /// 安全模式：只注册/启用内置插件，外部插件一个都不加载（连程序集都不读）。
+    /// 设置页仍能看到它们（标记为「安全模式已跳过」），用户可以退出安全模式后重启。
+    /// </summary>
+    public bool SkipExternalPlugins { get; init; }
 
     public IReadOnlyList<PluginInfo> Plugins => _instances.Select(i => i.Info).ToList();
 
@@ -39,6 +48,14 @@ public sealed class PluginHost
     internal SettingsService Settings { get; }
 
     internal DispatcherQueue Dispatcher { get; }
+
+    public Task<bool> SetEnabledAsync(string pluginId, bool enabled) => SerializeAsync(() => SetEnabledAsyncCore(pluginId, enabled));
+
+    public Task<bool> ReloadAsync(string pluginId) => SerializeAsync(() => ReloadAsyncCore(pluginId));
+
+    public Task<InstallResult> InstallAsync(string packagePath) => SerializeAsync(() => InstallAsyncCore(packagePath));
+
+    public Task<bool> UninstallAsync(string pluginId) => SerializeAsync(() => UninstallAsyncCore(pluginId));
 
     public void RegisterBuiltIn(PluginManifest manifest, Func<IIslandPlugin> factory)
         => _builtIns.Add((manifest, factory));
@@ -54,7 +71,7 @@ public sealed class PluginHost
         });
     }
 
-    public Task<bool> SetEnabledAsync(string pluginId, bool enabled) => UiDispatch.InvokeAsync(Dispatcher, async () =>
+    private Task<bool> SetEnabledAsyncCore(string pluginId, bool enabled) => UiDispatch.InvokeAsync(Dispatcher, async () =>
     {
         var instance = Find(pluginId);
         if (instance == null)
@@ -76,7 +93,7 @@ public sealed class PluginHost
         return true;
     });
 
-    public Task<bool> ReloadAsync(string pluginId) => UiDispatch.InvokeAsync(Dispatcher, async () =>
+    private Task<bool> ReloadAsyncCore(string pluginId) => UiDispatch.InvokeAsync(Dispatcher, async () =>
     {
         var instance = Find(pluginId);
         if (instance == null)
@@ -133,7 +150,7 @@ public sealed class PluginHost
         return instance.Info.State == PluginState.Active;
     });
 
-    public async Task<InstallResult> InstallAsync(string packagePath)
+    private async Task<InstallResult> InstallAsyncCore(string packagePath)
     {
         PreparedInstall prepared;
         try
@@ -152,14 +169,27 @@ public sealed class PluginHost
             await UiDispatch.RunAsync(Dispatcher, async () =>
             {
                 var existing = Find(manifest.Id);
+                if (existing?.Info.IsBuiltIn == true)
+                    throw new LwpInstallException("不能用外部插件包替换内置插件。");
+                var wasActive = existing?.Info.State == PluginState.Active;
                 if (existing != null)
                 {
                     await existing.DeactivateAsync();
                     await existing.UnloadAssemblyAsync();
-                    _instances.Remove(existing);
                 }
 
-                await Task.Run(() => LwpInstaller.Commit(prepared));
+                try { await Task.Run(() => LwpInstaller.Commit(prepared)); }
+                catch
+                {
+                    if (existing?.Info.Manifest is { } previous)
+                    {
+                        existing.Reset(previous);
+                        if (wasActive) await existing.ActivateAsync();
+                    }
+                    PluginsChanged?.Invoke();
+                    throw;
+                }
+                if (existing != null) _instances.Remove(existing);
                 ApplyDiscovered(new DiscoveredPlugin(prepared.TargetDirectory, manifest, null));
                 Settings.Set(DisabledKey(manifest.Id), false);
             });
@@ -184,7 +214,7 @@ public sealed class PluginHost
         }
     }
 
-    public Task<bool> UninstallAsync(string pluginId) => UiDispatch.InvokeAsync(Dispatcher, async () =>
+    private Task<bool> UninstallAsyncCore(string pluginId) => UiDispatch.InvokeAsync(Dispatcher, async () =>
     {
         var instance = Find(pluginId);
         if (instance == null || instance.Info.IsBuiltIn)
@@ -193,9 +223,9 @@ public sealed class PluginHost
         }
 
         var directory = instance.Info.Source;
+        var wasActive = instance.Info.State == PluginState.Active;
         await instance.DeactivateAsync();
         await instance.UnloadAssemblyAsync();
-        _instances.Remove(instance);
 
         try
         {
@@ -223,25 +253,35 @@ public sealed class PluginHost
         catch (Exception ex)
         {
             Logs.Host.Error($"移除插件目录失败：{ex.Message}");
+            if (instance.Info.Manifest is { } manifest)
+            {
+                instance.Reset(manifest);
+                if (wasActive) await instance.ActivateAsync();
+            }
+            PluginsChanged?.Invoke();
+            return false;
         }
 
+        _instances.Remove(instance);
         Settings.Remove(DisabledKey(pluginId));
         PluginsChanged?.Invoke();
         return true;
     });
 
-    public Task ShutdownAllAsync() => UiDispatch.RunAsync(Dispatcher, async () =>
+    public async Task ShutdownAllAsync()
     {
-        foreach (var instance in _instances.ToList())
+        _shuttingDown = true;
+        await _operations.WaitAsync();
+        try
         {
-            await instance.DeactivateAsync();
+            await UiDispatch.RunAsync(Dispatcher, async () =>
+            {
+                foreach (var instance in _instances.ToList()) await instance.DeactivateAsync();
+                foreach (var instance in _instances.ToList()) await instance.UnloadAssemblyAsync();
+            });
         }
-
-        foreach (var instance in _instances.ToList())
-        {
-            await instance.UnloadAssemblyAsync();
-        }
-    });
+        finally { _operations.Release(); }
+    }
 
     public void Dispose()
     {
@@ -330,9 +370,21 @@ public sealed class PluginHost
 
     private async Task ScanPackagesAsync()
     {
+        if (SkipExternalPlugins)
+        {
+            // 安全模式：一次目录扫描都不做 —— 崩溃可能就出在某个清单里，
+            // 连解析都跳过才能保证这一次启动是干净的。
+            var warning = "安全模式：已跳过全部外部插件。排查完后可在「设置 → 插件中心」退出安全模式并重启。";
+            _discoveryWarnings.Add(warning);
+            Logs.Host.Warn(warning);
+            return;
+        }
+
         var (legacyDlls, packages, staleDirectories) = await Task.Run(() =>
         {
             Directory.CreateDirectory(PluginsDirectory);
+            LwpInstaller.RecoverInterruptedInstalls(PluginsDirectory,
+                (path, ex) => Logs.Host.Error($"恢复中断安装失败：{path}", ex));
             var stale = new List<string>();
             stale.AddRange(Directory.GetDirectories(PluginsDirectory, ".installing-*", SearchOption.TopDirectoryOnly));
             stale.AddRange(Directory.GetDirectories(PluginsDirectory, ".uninstalling-*", SearchOption.TopDirectoryOnly));
@@ -474,6 +526,13 @@ public sealed class PluginHost
                 continue;
             }
 
+            // 安全模式的双保险：即使某条外部插件已经被登记（例如内置清单里混进来的），也不启用
+            if (SkipExternalPlugins && !instance.Info.IsBuiltIn)
+            {
+                instance.SetDisabledState();
+                continue;
+            }
+
             if (IsDisabled(instance.Info.Id))
             {
                 instance.SetDisabledState();
@@ -482,6 +541,17 @@ public sealed class PluginHost
 
             await instance.ActivateAsync();
         }
+    }
+
+    private async Task<T> SerializeAsync<T>(Func<Task<T>> operation)
+    {
+        await _operations.WaitAsync();
+        try
+        {
+            if (_shuttingDown) throw new InvalidOperationException("应用正在退出，不能再修改插件。");
+            return await operation();
+        }
+        finally { _operations.Release(); }
     }
 
     private void RaiseChanged()

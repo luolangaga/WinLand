@@ -20,6 +20,7 @@ internal sealed class EdgeStripWindow : Window
     private readonly Border _bar;
     private readonly OverlappedPresenter _presenter;
     private bool _visible;
+    private int _motionVersion;
 
     public EdgeStripWindow()
     {
@@ -47,6 +48,8 @@ internal sealed class EdgeStripWindow : Window
         SystemBackdrop = new TransparentBackdrop();
         Win32.MakeIslandStyle(_hwnd);
         AppWindow.Hide();
+        Motion.Visual(_bar).Opacity = 0;
+        Closed += (_, _) => ++_motionVersion;
     }
 
     /// <summary>落到物理像素矩形并显示。</summary>
@@ -57,8 +60,10 @@ internal sealed class EdgeStripWindow : Window
         if (!_visible)
         {
             _visible = true;
+            ++_motionVersion;
             AppWindow.Show(false);
             Win32.MakeIslandStyle(_hwnd);
+            Motion.Scalar(Motion.Visual(_bar), "Opacity", 1, 180);
         }
     }
 
@@ -66,7 +71,16 @@ internal sealed class EdgeStripWindow : Window
     {
         if (!_visible) return;
         _visible = false;
-        AppWindow.Hide();
+        int version = ++_motionVersion;
+        var visual = Motion.Visual(_bar);
+        var batch = visual.Compositor.CreateScopedBatch(Microsoft.UI.Composition.CompositionBatchTypes.Animation);
+        Motion.Scalar(visual, "Opacity", 0, 140);
+        batch.Completed += (_, _) =>
+        {
+            batch.Dispose();
+            if (version == _motionVersion && !_visible) AppWindow.Hide();
+        };
+        batch.End();
     }
 
     public nint Handle => _hwnd;

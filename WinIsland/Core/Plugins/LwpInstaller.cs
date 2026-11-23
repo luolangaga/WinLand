@@ -133,14 +133,50 @@ public static class LwpInstaller
     {
         // 旧版本目录可能仍被上一代程序集占用（Windows 文件锁），此时直接删除会失败；
         // 改为先改名（改名通常不受文件锁影响），再把新目录移入，最后尽力清理旧目录。
+        string? retired = null;
         if (System.IO.Directory.Exists(prepared.TargetDirectory))
         {
-            var retired = prepared.TargetDirectory + ".uninstalling-" + Guid.NewGuid().ToString("N")[..8];
+            retired = Path.Combine(Path.GetDirectoryName(prepared.TargetDirectory)!, ".rollback-" + Guid.NewGuid().ToString("N"));
             System.IO.Directory.Move(prepared.TargetDirectory, retired);
-            TryDeleteDirectory(retired);
         }
 
-        System.IO.Directory.Move(prepared.TempDirectory, prepared.TargetDirectory);
+        try
+        {
+            System.IO.Directory.Move(prepared.TempDirectory, prepared.TargetDirectory);
+        }
+        catch
+        {
+            if (retired != null) System.IO.Directory.Move(retired, prepared.TargetDirectory);
+            throw;
+        }
+        if (retired != null) TryDeleteDirectory(retired);
+    }
+
+    public static void RecoverInterruptedInstalls(string pluginsDirectory, Action<string, Exception>? onError = null)
+    {
+        if (!Directory.Exists(pluginsDirectory)) return;
+        foreach (var retired in Directory.GetDirectories(pluginsDirectory, ".rollback-*"))
+        {
+            try
+            {
+                var manifest = PluginManifestReader.Read(retired);
+                var target = Path.Combine(pluginsDirectory, manifest.Id);
+                if (!Directory.Exists(target)) Directory.Move(retired, target);
+                else
+                {
+                    var current = PluginManifestReader.Read(target);
+                    if (current.Id != manifest.Id || !File.Exists(Path.Combine(target, current.EntryDll)))
+                        throw new LwpInstallException("新安装目录不完整，保留旧目录等待恢复。");
+                    TryDeleteDirectory(retired);
+                }
+            }
+            catch (Exception ex)
+            {
+                // 不可读的备份不应阻止其余插件启动，也不能直接删掉。
+                if (onError == null) throw;
+                onError(retired, ex);
+            }
+        }
     }
 
     public static void Cleanup(PreparedInstall? prepared)

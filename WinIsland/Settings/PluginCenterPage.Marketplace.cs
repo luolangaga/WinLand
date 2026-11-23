@@ -16,7 +16,7 @@ namespace WinIsland.Settings;
 /// 插件市场：列表只来自社区仓库的 index.json（一次请求，图标内嵌），
 /// 安装时才下载 .lwp 并校验 SHA-256，然后交给 <see cref="PluginHost"/> 安装/更新。
 /// </summary>
-public sealed partial class MarketplacePage : UserControl
+public sealed partial class PluginCenterPage
 {
     private const string MakerSkillRepoGitHub = "https://github.com/luolangaga/WinLandPluginSkills";
     private const string MakerSkillRepoGitCode = "https://gitcode.com/luolangaga/WinLandPluginSkills";
@@ -36,115 +36,6 @@ public sealed partial class MarketplacePage : UserControl
     private bool _installing;
     private string _filter = "";
 
-    public MarketplacePage(MarketplaceService market, PluginHost plugins)
-    {
-        _market = market;
-        _plugins = plugins;
-        InitializeComponent();
-
-        BaseUrlBox.Text = market.ConfiguredBaseUrl ?? "";
-        UpdateBaseUrlUi();
-
-        _plugins.PluginsChanged += OnPluginsChanged;
-        Unloaded += (_, _) =>
-        {
-            _plugins.PluginsChanged -= OnPluginsChanged;
-            _loadCts?.Cancel();
-            _installCts?.Cancel();
-        };
-
-        _ = LoadAsync(force: false);
-    }
-
-    private void OnPluginsChanged()
-    {
-        if (DispatcherQueue.HasThreadAccess)
-        {
-            Rebuild();
-        }
-        else
-        {
-            DispatcherQueue.TryEnqueue(Rebuild);
-        }
-    }
-
-    private async Task LoadAsync(bool force)
-    {
-        if (_loading)
-        {
-            return;
-        }
-
-        _loading = true;
-        Busy.IsActive = true;
-        RefreshButton.IsEnabled = false;
-        _loadCts?.Cancel();
-        _loadCts = new CancellationTokenSource();
-
-        try
-        {
-            var index = await _market.GetIndexAsync(force, _loadCts.Token);
-            _index = index;
-            Rebuild();
-
-            if (_market.LastIndexFromCache && force)
-            {
-                ShowStatus("已使用本地缓存", _market.LastIndexNote ?? $"无法连接市场源，显示的是 {DescribeTime(_market.LastIndexTime)} 的缓存清单。", InfoBarSeverity.Warning);
-            }
-            else if (_market.IsMirrorActive)
-            {
-                ShowStatus("已切换到镜像源", $"官方 GitHub 源不可用，当前使用 {_market.ActiveSourceLabel}（内容一致，镜像同步可能略有延迟）。", InfoBarSeverity.Informational);
-            }
-            else
-            {
-                StatusBar.IsOpen = false;
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            ShowStatus("无法获取插件列表", ex.Message, InfoBarSeverity.Error);
-            if (_index == null)
-            {
-                PluginList.Children.Clear();
-            }
-        }
-        finally
-        {
-            _loading = false;
-            Busy.IsActive = false;
-            RefreshButton.IsEnabled = true;
-            UpdateUpdatedText();
-        }
-    }
-
-    private void Rebuild()
-    {
-        _progressBars.Clear();
-        PluginList.Children.Clear();
-
-        var plugins = _index?.Plugins ?? new List<MarketplacePlugin>();
-        var shown = 0;
-
-        foreach (var plugin in plugins)
-        {
-            if (!Matches(plugin, _filter))
-            {
-                continue;
-            }
-
-            PluginList.Children.Add(BuildCard(plugin));
-            shown++;
-        }
-
-        PluginList.IsHitTestVisible = !_installing;
-        EmptyText.Text = plugins.Count == 0 ? "市场里还没有插件" : "没有匹配的插件";
-        EmptyText.Visibility = shown == 0 ? Visibility.Visible : Visibility.Collapsed;
-        UpdateUpdatedText();
-    }
-
     private static bool Matches(MarketplacePlugin plugin, string filter)
     {
         if (string.IsNullOrWhiteSpace(filter))
@@ -163,174 +54,6 @@ public sealed partial class MarketplacePage : UserControl
     private static bool Contains(string? value, string needle)
         => !string.IsNullOrEmpty(value) && value.Contains(needle, StringComparison.OrdinalIgnoreCase);
 
-    private Border BuildCard(MarketplacePlugin plugin)
-    {
-        var status = GetStatus(plugin, out var installed, out var reason);
-
-        var root = new Grid { ColumnSpacing = 14, Padding = new Thickness(4) };
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        root.Children.Add(BuildLogo(plugin));
-
-        var info = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(info, 1);
-
-        // 名称、版本、状态用 Grid 的星号列约束，横向 StackPanel 会被长名称撑出卡片
-        var titleRow = new Grid { ColumnSpacing = 8 };
-        titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        titleRow.Children.Add(new TextBlock
-        {
-            Text = plugin.Name,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            VerticalAlignment = VerticalAlignment.Center,
-            TextWrapping = TextWrapping.Wrap,
-        });
-
-        var versionBadge = BuildBadge($"v{plugin.Version}", 0x00, 0x7A, 0xFF);
-        Grid.SetColumn(versionBadge, 1);
-        titleRow.Children.Add(versionBadge);
-
-        var stateBadge = BuildStatusBadge(status);
-        Grid.SetColumn(stateBadge, 2);
-        titleRow.Children.Add(stateBadge);
-
-        info.Children.Add(titleRow);
-
-        var meta = new List<string> { plugin.Id };
-        if (!string.IsNullOrEmpty(plugin.Author)) meta.Add($"作者: {plugin.Author}");
-        meta.Add(plugin.DescribeSize());
-        if (!string.IsNullOrEmpty(plugin.License)) meta.Add(plugin.License);
-        if (installed != null && !string.IsNullOrEmpty(installed.Version)) meta.Add($"本地 {installed.Version}");
-
-        info.Children.Add(new TextBlock
-        {
-            Text = string.Join(" · ", meta),
-            FontSize = 11,
-            TextWrapping = TextWrapping.Wrap,
-            Foreground = ThemeBrush("TextFillColorSecondaryBrush", 0x90, 0x90, 0x95),
-        });
-
-        if (!string.IsNullOrEmpty(plugin.Description))
-        {
-            info.Children.Add(new TextBlock
-            {
-                Text = plugin.Description,
-                FontSize = 12,
-                TextWrapping = TextWrapping.Wrap,
-                MaxLines = 2,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Foreground = ThemeBrush("TextFillColorTertiaryBrush", 0x80, 0x80, 0x85),
-            });
-        }
-
-        if (plugin.Tags.Count > 0)
-        {
-            var tags = ChipList.Build(plugin.Tags.Take(5));
-            tags.Margin = new Thickness(0, 2, 0, 0);
-            info.Children.Add(tags);
-        }
-
-        if (status == MarketStatus.Incompatible && reason != null)
-        {
-            info.Children.Add(new TextBlock
-            {
-                Text = reason,
-                FontSize = 11,
-                TextWrapping = TextWrapping.Wrap,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 157, 93, 0)),
-            });
-        }
-
-        var progress = new ProgressBar
-        {
-            Minimum = 0,
-            Maximum = 100,
-            Height = 3,
-            Margin = new Thickness(0, 6, 0, 0),
-            Visibility = Visibility.Collapsed,
-        };
-        info.Children.Add(progress);
-        _progressBars[plugin.Id] = progress;
-
-        root.Children.Add(info);
-
-        var actions = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 6,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        Grid.SetColumn(actions, 2);
-
-        actions.Children.Add(BuildInstallButton(plugin, status, installed));
-        actions.Children.Add(BuildDetailsButton(plugin, status, installed));
-        root.Children.Add(actions);
-
-        return new Border
-        {
-            Style = (Style)Application.Current.Resources["SettingsCardStyle"],
-            Child = root,
-        };
-    }
-
-    private Button BuildInstallButton(MarketplacePlugin plugin, MarketStatus status, PluginInfo? installed)
-    {
-        var button = new Button
-        {
-            MinWidth = 96,
-            IsEnabled = !_installing && status is MarketStatus.NotInstalled or MarketStatus.UpdateAvailable or MarketStatus.Installed or MarketStatus.LocalNewer,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-
-        switch (status)
-        {
-            case MarketStatus.NotInstalled:
-                button.Content = "安装";
-                button.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
-                button.Click += async (_, _) => await InstallAsync(plugin);
-                break;
-            case MarketStatus.UpdateAvailable:
-                button.Content = "更新";
-                button.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
-                ToolTipService.SetToolTip(button, $"更新到 v{plugin.Version}（本地 {installed?.Version}）");
-                button.Click += async (_, _) => await InstallAsync(plugin);
-                break;
-            case MarketStatus.LocalNewer:
-                button.Content = "本地已较新";
-                button.IsEnabled = false;
-                ToolTipService.SetToolTip(button, $"本地版本 {installed?.Version} 高于市场版本 {plugin.Version}，已跳过");
-                break;
-            case MarketStatus.Installed:
-                button.Content = "重新安装";
-                ToolTipService.SetToolTip(button, $"已安装 v{installed?.Version}。启用/禁用请到「插件管理」");
-                button.Click += async (_, _) => await InstallAsync(plugin);
-                break;
-            default:
-                button.Content = "不可用";
-                button.IsEnabled = false;
-                break;
-        }
-
-        return button;
-    }
-
-    private Button BuildDetailsButton(MarketplacePlugin plugin, MarketStatus status, PluginInfo? installed)
-    {
-        var button = new Button
-        {
-            Content = "详情",
-            IsEnabled = !_installing,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        button.Click += async (_, _) => await ShowDetailsAsync(plugin, status, installed);
-        return button;
-    }
-
     private Border BuildLogo(MarketplacePlugin plugin)
     {
         var border = new Border
@@ -339,7 +62,7 @@ public sealed partial class MarketplacePage : UserControl
             Height = 56,
             CornerRadius = new CornerRadius(12),
             VerticalAlignment = VerticalAlignment.Center,
-            Background = ThemeBrush("ControlFillColorSecondaryBrush", 0x1A, 0x1A, 0x1A),
+            Style = (Style)Resources["LocalLogo"],
         };
 
         if (plugin.HasLogo)
@@ -350,12 +73,11 @@ public sealed partial class MarketplacePage : UserControl
         }
         else
         {
-            border.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 122, 255));
             border.Child = new FontIcon
             {
                 Glyph = string.IsNullOrEmpty(plugin.IconGlyph) ? "\uE7B8" : plugin.IconGlyph,
                 FontSize = 22,
-                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                Style = (Style)Resources["LocalIcon"],
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
             };
@@ -432,6 +154,7 @@ public sealed partial class MarketplacePage : UserControl
     {
         installed = _plugins.Plugins.FirstOrDefault(p => string.Equals(p.Id, plugin.Id, StringComparison.OrdinalIgnoreCase));
         reason = null;
+        if (installed?.IsBuiltIn == true) return MarketStatus.Installed;
 
         if (!plugin.IsCompatible(out reason))
         {
@@ -454,7 +177,7 @@ public sealed partial class MarketplacePage : UserControl
 
     private async Task InstallAsync(MarketplacePlugin plugin)
     {
-        if (_installing)
+        if (IsBusy)
         {
             return;
         }
@@ -467,6 +190,7 @@ public sealed partial class MarketplacePage : UserControl
 
         _installing = true;
         _installCts?.Cancel();
+        _installCts?.Dispose();
         _installCts = new CancellationTokenSource();
         SetCardBusy(plugin.Id, true);
         ShowStatus("正在安装", $"正在下载 {plugin.Name} {plugin.Version}…", InfoBarSeverity.Informational);
@@ -511,6 +235,8 @@ public sealed partial class MarketplacePage : UserControl
         finally
         {
             _installing = false;
+            _installCts?.Dispose();
+            _installCts = null;
             SetCardBusy(plugin.Id, false);
             Rebuild();
         }
@@ -527,11 +253,12 @@ public sealed partial class MarketplacePage : UserControl
             }
         }
 
-        PluginList.IsHitTestVisible = !busy;
+        UpdateBusyState();
     }
 
     private async Task ShowDetailsAsync(MarketplacePlugin plugin, MarketStatus status, PluginInfo? installed)
     {
+        using var readmeCts = new CancellationTokenSource();
         var panel = new StackPanel { Spacing = 14 };
 
         var header = new Grid { ColumnSpacing = 14 };
@@ -557,7 +284,7 @@ public sealed partial class MarketplacePage : UserControl
             Text = BuildDetailLine(plugin, installed),
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = ThemeBrush("TextFillColorSecondaryBrush", 0x90, 0x90, 0x95),
+            Style = (Style)Resources["SecondaryText"],
         });
         header.Children.Add(head);
         panel.Children.Add(header);
@@ -612,7 +339,7 @@ public sealed partial class MarketplacePage : UserControl
                 Text = reason,
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 157, 93, 0)),
+                Style = (Style)Resources["CautionText"],
             });
         }
 
@@ -636,14 +363,15 @@ public sealed partial class MarketplacePage : UserControl
         else
         {
             readmeHost.Children.Add(Placeholder("正在加载说明…"));
-            LoadReadme(readmeHost, plugin);
+            _ = LoadReadmeAsync(readmeHost, plugin, readmeCts.Token);
         }
 
         panel.Children.Add(readmeHost);
 
-        var installable = status is MarketStatus.NotInstalled or MarketStatus.UpdateAvailable or MarketStatus.Installed or MarketStatus.LocalNewer;
+        var installable = installed?.IsBuiltIn != true && status is (MarketStatus.NotInstalled or MarketStatus.UpdateAvailable or MarketStatus.Installed);
         var dialog = new ContentDialog
         {
+            RequestedTheme = ActualTheme,
             XamlRoot = XamlRoot,
             Title = "插件详情",
             Content = new ScrollViewer
@@ -655,12 +383,13 @@ public sealed partial class MarketplacePage : UserControl
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 Content = panel,
             },
-            PrimaryButtonText = installable ? (status == MarketStatus.UpdateAvailable ? $"更新到 v{plugin.Version}" : "安装") : null,
+            PrimaryButtonText = installable ? (status == MarketStatus.UpdateAvailable ? $"更新到 v{plugin.Version}" : status == MarketStatus.Installed ? "重新安装" : "安装") : null,
             CloseButtonText = installable ? "关闭" : "确定",
             DefaultButton = installable ? ContentDialogButton.Primary : ContentDialogButton.Close,
         };
 
         var result = await dialog.ShowAsync();
+        readmeCts.Cancel();
         if (installable && result == ContentDialogResult.Primary)
         {
             await InstallAsync(plugin);
@@ -697,6 +426,7 @@ public sealed partial class MarketplacePage : UserControl
 
         var dialog = new ContentDialog
         {
+            RequestedTheme = ActualTheme,
             XamlRoot = XamlRoot,
             Title = "用 AI 做插件",
             Content = new ScrollViewer
@@ -756,24 +486,24 @@ public sealed partial class MarketplacePage : UserControl
         TextWrapping = TextWrapping.Wrap,
     };
 
-    private static TextBlock MakerHint(string text) => new()
+    private TextBlock MakerHint(string text) => new()
     {
         Text = text,
         FontSize = 12,
         TextWrapping = TextWrapping.Wrap,
-        Foreground = ThemeBrush("TextFillColorSecondaryBrush", 0x90, 0x90, 0x95),
+        Style = (Style)Resources["SecondaryText"],
     };
 
-    private static UIElement MakerNote(string text) => new Border
+    private UIElement MakerNote(string text) => new Border
     {
-        BorderBrush = ThemeBrush("AccentFillColorDefaultBrush", 0x00, 0x78, 0xD4),
+        Style = (Style)Resources["MakerNoteStyle"],
         BorderThickness = new Thickness(3, 0, 0, 0),
         Padding = new Thickness(10, 2, 0, 2),
         Child = MakerHint(text),
     };
 
     /// <summary>一段提示词 + 右侧「复制」按钮；label 为空时不显示上方小标题。</summary>
-    private static UIElement MakerPrompt(string? label, string prompt)
+    private UIElement MakerPrompt(string? label, string prompt)
     {
         var grid = new Grid { ColumnSpacing = 8 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -781,8 +511,7 @@ public sealed partial class MarketplacePage : UserControl
 
         grid.Children.Add(new Border
         {
-            Background = ThemeBrush("ControlFillColorSecondaryBrush", 0x14, 0x14, 0x14),
-            BorderBrush = ThemeBrush("CardStrokeColorDefaultBrush", 0x33, 0x33, 0x33),
+            Style = (Style)Resources["CodePanel"],
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(6),
             Padding = new Thickness(10, 8, 10, 8),
@@ -815,7 +544,7 @@ public sealed partial class MarketplacePage : UserControl
         {
             Text = label,
             FontSize = 11,
-            Foreground = ThemeBrush("TextFillColorSecondaryBrush", 0x90, 0x90, 0x95),
+            Style = (Style)Resources["SecondaryText"],
         });
         host.Children.Add(grid);
         return host;
@@ -845,11 +574,11 @@ public sealed partial class MarketplacePage : UserControl
     }
 
     /// <summary>README 以 Markdown 渲染；相对链接解析到仓库 main 分支上的对应文件。</summary>
-    private async void LoadReadme(StackPanel host, MarketplacePlugin plugin)
+    private async Task LoadReadmeAsync(StackPanel host, MarketplacePlugin plugin, CancellationToken cancellationToken)
     {
         try
         {
-            var text = await _market.GetReadmeAsync(plugin, CancellationToken.None);
+            var text = await _market.GetReadmeAsync(plugin, cancellationToken);
             host.Children.Clear();
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -861,6 +590,7 @@ public sealed partial class MarketplacePage : UserControl
         }
         catch (Exception ex)
         {
+            if (cancellationToken.IsCancellationRequested) return;
             host.Children.Clear();
             host.Children.Add(Placeholder($"（说明加载失败：{ex.Message}）"));
         }
@@ -879,12 +609,12 @@ public sealed partial class MarketplacePage : UserControl
             : null;
     }
 
-    private static TextBlock Placeholder(string text) => new()
+    private TextBlock Placeholder(string text) => new()
     {
         Text = text,
         TextWrapping = TextWrapping.Wrap,
         FontSize = 12,
-        Foreground = ThemeBrush("TextFillColorSecondaryBrush", 0x90, 0x90, 0x95),
+        Style = (Style)Resources["SecondaryText"],
     };
 
     private static string BuildDetailLine(MarketplacePlugin plugin, PluginInfo? installed)
@@ -896,7 +626,7 @@ public sealed partial class MarketplacePage : UserControl
         return string.Join(" · ", parts);
     }
 
-    private static void AddMetaRow(Panel host, string label, string value)
+    private void AddMetaRow(Panel host, string label, string value)
         => AddMetaRow(host, label, new TextBlock
         {
             Text = value,
@@ -909,7 +639,7 @@ public sealed partial class MarketplacePage : UserControl
     /// 元数据行：标签列定宽 + 内容列星号。**不要用横向 StackPanel** —— 它按内容无限宽度测量子元素，
     /// TextWrapping 不会生效，长文本（SHA-256、更新时间、主页 URL）会直接顶出对话框。
     /// </summary>
-    private static void AddMetaRow(Panel host, string label, FrameworkElement value)
+    private void AddMetaRow(Panel host, string label, FrameworkElement value)
     {
         var row = new Grid { ColumnSpacing = 8 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
@@ -920,7 +650,7 @@ public sealed partial class MarketplacePage : UserControl
             Text = label,
             FontSize = 12,
             VerticalAlignment = VerticalAlignment.Top,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 128, 128, 133)),
+            Style = (Style)Resources["SecondaryText"],
         });
 
         Grid.SetColumn(value, 1);
@@ -928,42 +658,8 @@ public sealed partial class MarketplacePage : UserControl
         host.Children.Add(row);
     }
 
-    private Border BuildStatusBadge(MarketStatus status)
-    {
-        var (text, color) = status switch
-        {
-            MarketStatus.Installed => ("已安装", Windows.UI.Color.FromArgb(255, 16, 124, 16)),
-            MarketStatus.UpdateAvailable => ("可更新", Windows.UI.Color.FromArgb(255, 0, 95, 184)),
-            MarketStatus.LocalNewer => ("本地较新", Windows.UI.Color.FromArgb(255, 128, 128, 128)),
-            MarketStatus.Incompatible => ("不兼容", Windows.UI.Color.FromArgb(255, 196, 43, 28)),
-            _ => ("未安装", Windows.UI.Color.FromArgb(255, 128, 128, 128)),
-        };
-
-        return BuildBadge(text, color.R, color.G, color.B);
-    }
-
-    private static Border BuildBadge(string text, byte r, byte g, byte b) => new()
-    {
-        Background = new SolidColorBrush(Windows.UI.Color.FromArgb(40, r, g, b)),
-        CornerRadius = new CornerRadius(4),
-        Padding = new Thickness(6, 1, 6, 1),
-        VerticalAlignment = VerticalAlignment.Center,
-        Child = new TextBlock
-        {
-            Text = text,
-            FontSize = 11,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, r, g, b)),
-            VerticalAlignment = VerticalAlignment.Center,
-        },
-    };
-
     private void Search_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
-        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput)
-        {
-            return;
-        }
-
         _filter = sender.Text;
         Rebuild();
     }
@@ -974,21 +670,9 @@ public sealed partial class MarketplacePage : UserControl
 
     private void ResetUrl_Click(object sender, RoutedEventArgs e)
     {
-        _market.ConfiguredBaseUrl = null;
         BaseUrlBox.Text = "";
-        UpdateBaseUrlUi();
-        _ = LoadAsync(force: true);
+        BaseUrlHint.Text = "点击「应用并刷新」恢复自动选择官方源和镜像。";
     }
-
-    private void BaseUrlBox_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
-    {
-        if (e.Key == Windows.System.VirtualKey.Enter)
-        {
-            ApplyBaseUrl();
-        }
-    }
-
-    private void BaseUrlBox_LostFocus(object sender, RoutedEventArgs e) => ApplyBaseUrl();
 
     private void ApplyBaseUrl()
     {
@@ -1022,19 +706,6 @@ public sealed partial class MarketplacePage : UserControl
         }
     }
 
-    private void UpdateUpdatedText()
-    {
-        var count = _index?.Plugins.Count ?? 0;
-        if (_market.LastIndexTime is { } time)
-        {
-            UpdatedText.Text = $"共 {count} 个插件 · 更新于 {DescribeTime(time)} · 来源 {_market.ActiveSourceLabel}";
-        }
-        else
-        {
-            UpdatedText.Text = count > 0 ? $"共 {count} 个插件" : "";
-        }
-    }
-
     private static string DescribeTime(DateTimeOffset? time)
         => time is { } value ? value.ToLocalTime().ToString("MM-dd HH:mm") : "未知时间";
 
@@ -1056,11 +727,6 @@ public sealed partial class MarketplacePage : UserControl
         {
         }
     }
-
-    private static Brush ThemeBrush(string key, byte r, byte g, byte b)
-        => Application.Current.Resources.TryGetValue(key, out var value) && value is Brush brush
-            ? brush
-            : new SolidColorBrush(Windows.UI.Color.FromArgb(255, r, g, b));
 
     private enum MarketStatus
     {

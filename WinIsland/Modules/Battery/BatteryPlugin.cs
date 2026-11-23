@@ -20,12 +20,17 @@ public sealed class BatteryPlugin : IslandPluginBase
     protected override Task OnInitializeAsync()
     {
         _enabled = Settings.Get("enabled", true);
-        _vm = new BatteryViewModel();
+        _vm = new BatteryViewModel { GlowEnabled = Settings.Get("glow", true),
+            BackgroundMode = Settings.Get("background", "beam"),
+            BackgroundIntensity = Settings.Get("backgroundIntensity", 50) / 100.0 };
+        Context.OnSettingsChanged("glow", () => _vm.GlowEnabled = Settings.Get("glow", true));
         _content = BuildContent();
 
         Context.Island.AddSettingsPage(new SettingsPageDescriptor(
             "battery", Manifest.Name, "\uE857", () => new BatterySettingsPage(Context, this), 20));
 
+        Context.OnSettingsChanged("background", () => _vm.BackgroundMode = Settings.Get("background", "beam"));
+        Context.OnSettingsChanged("backgroundIntensity", () => _vm.BackgroundIntensity = Settings.Get("backgroundIntensity", 50) / 100.0);
         Context.OnSettingsChanged("enabled", () =>
         {
             _enabled = Settings.Get("enabled", true);

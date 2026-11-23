@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using WinIsland.Core;
+using WinIsland.PluginViews;
 
 namespace HardwareMonitor;
 
@@ -26,13 +27,9 @@ public sealed class HardwareMonitorView : UserControl, IMorphView
     private readonly TextBlock _gpuName;
     private readonly TextBlock _netValue;
     private readonly TextBlock _netName;
-    private readonly DispatcherQueueTimer _morphTimer;
+    private readonly MorphProgress _morph;
     private readonly IIslandTheme _theme;
 
-    private DateTimeOffset _morphStart;
-    private TimeSpan _morphDuration = TimeSpan.FromMilliseconds(333);
-    private double _morphFrom;
-    private double _morphTarget;
     private double _progress;
 
     public HardwareMonitorView(IIslandTheme theme)
@@ -46,11 +43,11 @@ public sealed class HardwareMonitorView : UserControl, IMorphView
         _compactText = NewValueText(13, _valueBrush);
         _fpsValue = NewValueText(20, _valueBrush);
         _fpsProcess = NewHintText(_hintBrush);
-        _cpuValue = NewValueText(13, _valueBrush);
+        _cpuValue = NewValueText(18, _valueBrush);
         _cpuName = NewHintText(_hintBrush);
-        _gpuValue = NewValueText(13, _valueBrush);
+        _gpuValue = NewValueText(18, _valueBrush);
         _gpuName = NewHintText(_hintBrush);
-        _netValue = NewValueText(13, _valueBrush);
+        _netValue = NewValueText(12, _valueBrush);
         _netName = NewHintText(_hintBrush);
         var icon = new FontIcon
         {
@@ -75,10 +72,7 @@ public sealed class HardwareMonitorView : UserControl, IMorphView
             Padding = new Thickness(0, 8, 0, 0),
             Children =
             {
-                BuildFpsRow(),
-                BuildMetricRow("CPU", _cpuValue, _cpuName),
-                BuildMetricRow("GPU", _gpuValue, _gpuName),
-                BuildMetricRow("网络", _netValue, _netName),
+                BuildDashboard(),
             },
         };
 
@@ -91,10 +85,8 @@ public sealed class HardwareMonitorView : UserControl, IMorphView
 
         Content = root;
 
-        _morphTimer = DispatcherQueue.CreateTimer();
-        _morphTimer.Interval = TimeSpan.FromMilliseconds(16);
-        _morphTimer.IsRepeating = true;
-        _morphTimer.Tick += (_, _) => OnMorphTick();
+        _morph = new MorphProgress(ApplyProgress);
+        Unloaded += (_, _) => _morph.Complete();
     }
 
     public UIElement View => this;
@@ -128,28 +120,7 @@ public sealed class HardwareMonitorView : UserControl, IMorphView
 
     public void AnimateToCompact(TimeSpan duration) => StartMorph(0, duration);
 
-    private void StartMorph(double target, TimeSpan duration)
-    {
-        _morphFrom = _progress;
-        _morphTarget = target;
-        _morphDuration = duration;
-        _morphStart = DateTimeOffset.UtcNow;
-        _morphTimer.Start();
-    }
-
-    private void OnMorphTick()
-    {
-        var elapsed = (DateTimeOffset.UtcNow - _morphStart).TotalMilliseconds;
-        var duration = Math.Max(1, _morphDuration.TotalMilliseconds);
-        var t = Math.Clamp(elapsed / duration, 0, 1);
-        var eased = 1 - Math.Pow(1 - t, 3);
-        ApplyProgress(_morphFrom + (_morphTarget - _morphFrom) * eased);
-        if (t >= 1)
-        {
-            ApplyProgress(_morphTarget);
-            _morphTimer.Stop();
-        }
-    }
+    private void StartMorph(double target, TimeSpan duration) => _morph.To(target, duration);
 
     private void ApplyProgress(double value)
     {
@@ -158,56 +129,36 @@ public sealed class HardwareMonitorView : UserControl, IMorphView
         _expandedPanel.Opacity = value;
     }
 
-    private UIElement BuildFpsRow()
+    private UIElement BuildDashboard()
     {
-        var row = new Grid { ColumnSpacing = 10 };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var label = new TextBlock
+        var grid = new Grid { ColumnSpacing = 16, RowSpacing = 8 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var metrics = new[] { ("CPU", _cpuValue, _cpuName), ("GPU", _gpuValue, _gpuName),
+            ("帧率 · FPS", _fpsValue, _fpsProcess), ("网络", _netValue, _netName) };
+        for (int i = 0; i < metrics.Length; i++)
         {
-            Text = "帧率",
-            FontSize = 12,
-            Foreground = _hintBrush,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-
-        _fpsValue.TextAlignment = TextAlignment.Right;
-        Grid.SetColumn(_fpsProcess, 1);
-        _fpsProcess.VerticalAlignment = VerticalAlignment.Center;
-        _fpsProcess.TextTrimming = TextTrimming.CharacterEllipsis;
-        Grid.SetColumn(_fpsValue, 2);
-
-        row.Children.Add(label);
-        row.Children.Add(_fpsProcess);
-        row.Children.Add(_fpsValue);
-        return row;
-    }
-
-    private UIElement BuildMetricRow(string label, TextBlock value, TextBlock name)
-    {
-        var row = new Grid { ColumnSpacing = 10 };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        row.Children.Add(new TextBlock
-        {
-            Text = label,
-            FontSize = 12,
-            Foreground = _hintBrush,
-            VerticalAlignment = VerticalAlignment.Center,
-        });
-
-        value.TextAlignment = TextAlignment.Right;
-        Grid.SetColumn(value, 1);
-        row.Children.Add(value);
-
-        name.MaxWidth = 168;
-        Grid.SetColumn(name, 2);
-        row.Children.Add(name);
-        return row;
+            var (label, value, name) = metrics[i];
+            var cell = new Grid { RowSpacing = 2, ColumnSpacing = 8 };
+            cell.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            cell.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            cell.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            cell.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            cell.Children.Add(new TextBlock { Text = label, FontSize = 10, Foreground = _hintBrush, VerticalAlignment = VerticalAlignment.Center });
+            value.HorizontalAlignment = HorizontalAlignment.Right;
+            value.TextTrimming = TextTrimming.CharacterEllipsis;
+            Grid.SetColumn(value, 1);
+            cell.Children.Add(value);
+            Grid.SetRow(name, 1);
+            Grid.SetColumnSpan(name, 2);
+            cell.Children.Add(name);
+            Grid.SetRow(cell, i / 2);
+            Grid.SetColumn(cell, i % 2);
+            grid.Children.Add(cell);
+        }
+        return grid;
     }
 
     /// <summary>中性色：岛体深色时是白色系，浅色（Fluent + 浅色系统）时是黑色系。</summary>

@@ -523,6 +523,7 @@ pwsh tools/pack-plugin.ps1 -ProjectDir samples\HelloPlugin
 | `samples/HelloPlugin` | 代码构建 UI、私有依赖、设置页、定时器、完整清理、受管异常演示 |
 | `samples/XamlPlugin` | XAML 视图 + `PluginXaml.Load` + 逐帧形变动画 |
 | `samples/HardwareMonitor` | 真实功能插件：CPU/GPU/网络/帧率，自带 NuGet 依赖，设备选择，管理员提示 |
+| `samples/AgentHub` | Windows 代理中心：本地日志、Token 差分、引擎额度、命名管道 hooks、人工审批与聚光卡；接入矩阵见该目录 README |
 
 ---
 
@@ -556,3 +557,59 @@ pwsh tools/pack-plugin.ps1 -ProjectDir samples\HelloPlugin
 | 聚光卡打不开 / 一片空白 | `Content` 复用了岛视图里那个 `UIElement`（每个窗口一棵树，必须新建视图）；或宿主版本低于 2.1.0（日志里会有 `MissingMethodException`，`plugin.json` 写 `min_host_version: "2.1.0"`） |
 | 聚光卡一直不消失 | 卡片是模态的：点卡片外区域或按 `Esc` 收起，插件也可以自己调 `CloseSpotlight()` |
 | 帧率显示 `--` | 读取前台窗口帧率需要**以管理员身份运行 WinIsland**（ETW）；普通权限下显示桌面合成帧率 |
+
+## 2.5 可选宿主服务
+
+新插件可用 `Context is IPluginHostServices host` 获取宿主能力：
+
+- `DataDirectory`：每插件独立的 LocalAppData/WinIsland/PluginData/<id> 目录，升级插件后保留。
+- `LifetimeToken`：停用、卸载或初始化失败撤销注册时取消，后台读取和服务应响应它并在 ShutdownAsync 等待退出。
+- `TryActivateProcess(processId)`：尝试激活已知进程已有的主窗口；没有主窗口、已退出或 Windows 拒绝激活时返回 false，不会启动进程或模拟输入。
+
+这些能力放在独立接口中，旧 IPluginContext 实现不需要新增成员。依赖它们的插件应声明 `min_host_version: "2.5.0"`。AgentHub 是使用示例；数据目录的保存内容和 hook 生命周期由插件管理，宿主不会读取代理凭证。
+
+## 2.6 增量：多实例内容、事件总线
+
+**这两项都不会打断既有插件**：新成员全部带默认实现（`IIslandSurface`），新能力放在独立接口上（`IPluginBus`）。
+用 SDK 2.4 编译的插件在 2.6 宿主上照常加载运行（`tests/BinCompatProbe` 就是这条的回归验证）。
+
+### 多实例内容
+
+`IIslandSurface.SetContent(instanceId, content)` 让**同一个插件**同时挂多条常驻内容，
+每条各自参与优先级排序、各占一张展开队列卡片：
+
+```csharp
+// 两个城市各一张天气卡
+SetContent("city-beijing", BuildContent("北京"));
+SetContent("city-shanghai", BuildContent("上海"));
+RemoveContent("city-beijing");          // 等价于 SetContent("city-beijing", null)
+```
+
+* 实例 id 只需在插件内部唯一；重复用同一个 id 是覆盖语义（与单实例的 `SetContent` 一致）。
+* **不传实例 id 的老写法语义逐字不变**：`SetContent(content)` 仍然以插件 id 登记，与 2.5 及以前完全一致。
+* 优先级仍是**插件级**的（`plugin.<id>.priority` / 声明的 `Priority`）：多个实例共用同一个排序位置，
+  实例之间按登记顺序排列。要用不同的展开顺序，请给不同实例的内容对象设置不同的 `ExpandedPriority`。
+* 插件停用/卸载时，宿主逐条撤回该插件登记过的**全部**实例（不只是最后一条）。
+* 需要宿主 **2.6.0** 及以上：`min_host_version: "2.6.0"`（`api_version` 仍是 `2`）。
+
+### 插件间事件总线
+
+插件之间默认完全隔离（各自一个可回收 `AssemblyLoadContext`）。需要协作时用总线：
+
+```csharp
+if (Context is IPluginBus bus)
+{
+    bus.Subscribe("media.track", message =>
+    {
+        if (message.Payload is string title) UpdateLyricSource(title);
+    });
+    bus.Publish("weather.updated", new WeatherSnapshot { City = "北京", Celsius = 21 });
+}
+```
+
+* **同步派发**，在发布者所在线程上按订阅顺序执行；回调要轻，重活自己 `RunOnUI` / 后台线程。
+* **订阅随作用域回收**：插件停用/卸载即自动退订，插件自己忘了 `Dispose` 也不会留下悬挂引用。
+* **异常隔离**：某个订阅者抛异常只被吞掉（并计入它自己的错误计数），不影响发布者与其它订阅者。
+* 同一进程内有效；主题名由插件自行约定（建议点分小写）。
+* 需要宿主 **2.6.0** 及以上（`min_host_version: "2.6.0"`）。
+* 宿主自己也用总线：内置「正在播放」订阅 `host.media.playpause`（全局快捷键 `Ctrl+Alt+P` 触发）。

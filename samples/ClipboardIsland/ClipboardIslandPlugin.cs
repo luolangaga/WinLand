@@ -64,14 +64,13 @@ public sealed class ClipboardIslandPlugin : IslandPluginBase
     private bool _stopped;
 
     /// <summary>
-    /// 岛体换主题：岛视图就地重刷配色；聚光卡下次打开时自然会按新主题重建
-    /// （它是另一棵可视树，正在屏幕上开着的话留着旧配色直到收起，不值得为它做热替换）。
+    /// 岛体与聚光卡同时就地重刷配色，保持当前内容与滚动位置。
     /// </summary>
     private void OnThemeChanged()
     {
         Log.Info($"岛体主题已切换为{(Theme.IsLight ? "浅色" : "深色")}，重刷岛视图配色。");
         _view?.RefreshTheme();
-        _spotlight = null;
+        _spotlight?.RefreshTheme();
     }
 
     protected override Task OnInitializeAsync()

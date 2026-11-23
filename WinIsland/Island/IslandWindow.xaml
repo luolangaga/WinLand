@@ -37,9 +37,12 @@
                 DragLeave="IslandRoot_DragLeave"
                 DragOver="IslandRoot_DragOver"
                 Drop="IslandRoot_Drop"
+                PointerCaptureLost="IslandRoot_PointerCaptureLost"
                 PointerEntered="IslandRoot_PointerEntered"
                 PointerExited="IslandRoot_PointerExited"
+                PointerMoved="IslandRoot_PointerMoved"
                 PointerPressed="IslandRoot_PointerPressed"
+                PointerReleased="IslandRoot_PointerReleased"
                 Tapped="IslandRoot_Tapped">
                 <Grid>
                     <ContentPresenter x:Name="ContentHost" />
@@ -61,6 +64,16 @@
                 Grid.Row="1"
                 HorizontalAlignment="Center"
                 Visibility="Collapsed" />
+            <!-- 不参与主岛/队列的尺寸测量；位置与窗口圆形命中区由宿主同步更新。 -->
+            <Canvas Grid.RowSpan="2" IsHitTestVisible="False">
+                <Border x:Name="ActivityCountBadge"
+                        Width="24" Height="24" CornerRadius="12"
+                        Visibility="Collapsed">
+                    <TextBlock x:Name="ActivityCountText"
+                               FontSize="11" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+            </Canvas>
         </Grid>
     </Grid>
 </Window>

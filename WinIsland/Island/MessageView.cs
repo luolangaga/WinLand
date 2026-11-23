@@ -64,6 +64,8 @@ internal static class MessageView
             Text = msg.Title,
             FontSize = TitleSize,
             FontWeight = FontWeights.SemiBold,
+            LineHeight = 20,
+            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
             Foreground = IslandStyle.CreateMessageTitleBrush(light),
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxLines = 1,
@@ -82,6 +84,8 @@ internal static class MessageView
             {
                 Text = msg.Text.Trim(),
                 FontSize = TextSize,
+                LineHeight = 18,
+                LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
                 Foreground = IslandStyle.CreateMessageTextBrush(light),
                 TextWrapping = TextWrapping.Wrap,
                 TextTrimming = TextTrimming.CharacterEllipsis,

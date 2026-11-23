@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using WinIsland.Core;
+using WinIsland.PluginViews;
 
 namespace DeviceIsland;
 
@@ -18,12 +19,19 @@ public sealed class DeviceSpotlightView : UserControl
     private readonly IIslandTheme _theme;
     private readonly StackPanel _list;
     private readonly TextBlock _summary;
+    private readonly SolidColorBrush _titleBrush;
+    private readonly SolidColorBrush _summaryBrush;
+    private readonly SolidColorBrush _hintBrush;
+    private DeviceInfo[] _displayedDevices = [];
 
     internal DeviceSpotlightView(PluginManifest manifest, Action<DeviceInfo> onOpen, Action<DeviceInfo> onEject, IIslandTheme theme)
     {
         _onOpen = onOpen;
         _onEject = onEject;
         _theme = theme;
+        _titleBrush = new SolidColorBrush(Neutral(255));
+        _summaryBrush = new SolidColorBrush(Neutral(170));
+        _hintBrush = new SolidColorBrush(Neutral(120));
 
         // 聚光卡也跟着岛体主题明暗：浅色卡片上写死白色就是白字压白底
         var title = new TextBlock
@@ -31,16 +39,16 @@ public sealed class DeviceSpotlightView : UserControl
             Text = manifest.Name,
             FontSize = 24,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Neutral(255)),
+            Foreground = _titleBrush,
         };
 
         _summary = new TextBlock
         {
             FontSize = 13,
-            Foreground = new SolidColorBrush(Neutral(170)),
+            Foreground = _summaryBrush,
         };
 
-        _list = new StackPanel { Spacing = 2 };
+        _list = new StackPanel { Spacing = 6 };
 
         var scroll = new ScrollViewer
         {
@@ -55,7 +63,7 @@ public sealed class DeviceSpotlightView : UserControl
             Text = "「弹出」会先锁卷再卸载 —— 有文件被打开时会失败，先关掉再试。",
             FontSize = 11.5,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(Neutral(120)),
+            Foreground = _hintBrush,
         };
 
         var header = new StackPanel { Spacing = 4, Children = { title, _summary } };
@@ -85,10 +93,15 @@ public sealed class DeviceSpotlightView : UserControl
             ? $"当前共 {devices.Count} 台设备 · 每台都可单独打开或安全弹出"
             : "当前没有可移动设备。插上 U 盘、耳机或手柄，这里就会列出来。";
 
+        if (_displayedDevices.Length == devices.Count && _displayedDevices.Zip(devices).All(pair => pair.First.HasSamePresentation(pair.Second))) return;
+        var previousIds = _displayedDevices.Select(device => device.Id).ToHashSet();
+        _displayedDevices = devices.ToArray();
         _list.Children.Clear();
         foreach (var device in devices)
         {
-            _list.Children.Add(new DeviceRow(device, _theme, _onOpen, _onEject, dense: false));
+            var row = new DeviceRow(device, _theme, _onOpen, _onEject, dense: false);
+            _list.Children.Add(row);
+            if (IsLoaded && !previousIds.Contains(device.Id)) Motion.Reveal(row, 180, 4);
         }
     }
 
@@ -96,6 +109,14 @@ public sealed class DeviceSpotlightView : UserControl
     private Windows.UI.Color Neutral(byte alpha) => _theme.IsLight
         ? Windows.UI.Color.FromArgb(alpha, 0, 0, 0)
         : Windows.UI.Color.FromArgb(alpha, 255, 255, 255);
+
+    internal void RefreshTheme()
+    {
+        _titleBrush.Color = Neutral(255);
+        _summaryBrush.Color = Neutral(170);
+        _hintBrush.Color = Neutral(120);
+        foreach (var child in _list.Children) if (child is DeviceRow row) row.RefreshTheme();
+    }
 
     /// <summary>宿主收起卡片时的收尾（这里没有定时器/请求要取消，留作扩展点）。</summary>
     public void OnHostClosed()

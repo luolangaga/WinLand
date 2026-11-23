@@ -1,3 +1,4 @@
+using WinIsland.PluginViews;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -63,11 +64,7 @@ internal sealed class IslandInputView : IMorphView
     private readonly TextBox _input;
     private readonly TextBlock _echo;
     private readonly Border _echoBox;
-    private readonly DispatcherQueueTimer _morph;
-    private DateTimeOffset _morphStart;
-    private TimeSpan _morphDuration = TimeSpan.FromMilliseconds(1);
-    private double _morphFrom;
-    private double _morphTo;
+    private readonly MorphProgress _morph;
 
     public UIElement View { get; }
 
@@ -114,10 +111,12 @@ internal sealed class IslandInputView : IMorphView
         root.Children.Add(_echoBox);
         View = root;
 
-        _morph = root.DispatcherQueue.CreateTimer();
-        _morph.Interval = TimeSpan.FromMilliseconds(16);
-        _morph.IsRepeating = true;
-        _morph.Tick += (_, _) => MorphTick();
+        _morph = new MorphProgress(progress =>
+        {
+            _echoBox.Height = ExpandedEchoHeight * progress;
+            _echoBox.Opacity = progress;
+        });
+        root.Unloaded += (_, _) => _morph.Complete();
     }
 
     private const string EchoPrefix = "回显：（还没输入）";
@@ -132,25 +131,8 @@ internal sealed class IslandInputView : IMorphView
     private void ShowEcho()
         => _echo.Text = _input.Text.Length == 0 ? EchoPrefix : "回显：" + _input.Text;
 
-    private void StartMorph(double target, TimeSpan duration)
-    {
-        _morphFrom = _echoBox.Height;
-        _morphTo = target;
-        _morphStart = DateTimeOffset.UtcNow;
-        _morphDuration = duration <= TimeSpan.Zero ? TimeSpan.FromMilliseconds(1) : duration;
-        _morph.Stop();
-        _morph.Start();
-    }
+    private void StartMorph(double target, TimeSpan duration) => _morph.To(target / ExpandedEchoHeight, duration);
 
-    private void MorphTick()
-    {
-        double t = Math.Clamp(
-            (DateTimeOffset.UtcNow - _morphStart).TotalMilliseconds / _morphDuration.TotalMilliseconds, 0, 1);
-        double eased = 1 - Math.Pow(1 - t, 3);
-        _echoBox.Height = _morphFrom + (_morphTo - _morphFrom) * eased;
-        _echoBox.Opacity = ExpandedEchoHeight <= 0 ? 0 : _echoBox.Height / ExpandedEchoHeight;
-        if (t >= 1) _morph.Stop();
-    }
 }
 
 /// <summary>聚光卡视图：必须是独立于岛视图的可视树（每个窗口一棵树）。</summary>

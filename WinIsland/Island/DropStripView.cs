@@ -530,7 +530,7 @@ internal sealed class DropStripView
         var animation = new DoubleAnimation
         {
             To = to,
-            Duration = new Duration(duration),
+            Duration = new Duration(Motion.Enabled ? duration : TimeSpan.FromMilliseconds(1)),
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
         };
         Storyboard.SetTarget(animation, target);

@@ -17,20 +17,20 @@ namespace WinIsland.Settings;
 /// </summary>
 internal sealed class ChoiceCard
 {
-    private static readonly Color Accent = Color.FromArgb(255, 0, 122, 255);
-    private static readonly Color AccentSoft = Color.FromArgb(28, 0, 122, 255);
+    private static Color Accent => (ThemeBrush("AccentFillColorDefaultBrush", Color.FromArgb(255, 0, 120, 212)) as SolidColorBrush)?.Color ?? Color.FromArgb(255, 0, 120, 212);
+    private static Color AccentSoft => Color.FromArgb(20, Accent.R, Accent.G, Accent.B);
 
     private readonly Button _root;
     private bool _selected;
 
     private ChoiceCard(string automationId, FrameworkElement? diagram, string title, string? caption)
     {
-        var content = new StackPanel { Spacing = 6 };
+        var content = new StackPanel { Spacing = 8 };
 
         if (diagram != null)
         {
             diagram.HorizontalAlignment = HorizontalAlignment.Center;
-            content.Children.Add(diagram);
+            content.Children.Add(new Viewbox { Child = diagram, Height = 64, Stretch = Stretch.Uniform });
         }
 
         content.Children.Add(new TextBlock
@@ -48,7 +48,7 @@ internal sealed class ChoiceCard
             content.Children.Add(new TextBlock
             {
                 Text = caption,
-                FontSize = 11,
+                FontSize = 12,
                 TextAlignment = TextAlignment.Center,
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = ThemeBrush("TextFillColorSecondaryBrush", Color.FromArgb(255, 144, 144, 149)),
@@ -59,10 +59,11 @@ internal sealed class ChoiceCard
         {
             Style = (Style)Application.Current.Resources["ChoiceCardStyle"],
             Content = content,
-            MinHeight = diagram == null ? 96 : 148,
+            MinHeight = diagram == null ? 92 : 140,
         };
         AutomationProperties.SetAutomationId(_root, automationId);
         AutomationProperties.SetName(_root, title);
+        _root.ActualThemeChanged += (_, _) => UpdateSelectionVisual();
         UpdateSelectionVisual();
     }
 
@@ -144,6 +145,7 @@ internal sealed class ChoiceCard
 
     private void UpdateSelectionVisual()
     {
+        AutomationProperties.SetHelpText(_root, _selected ? "已选中" : "选择此选项");
         _root.Background = _selected
             ? new SolidColorBrush(AccentSoft)
             : ThemeBrush("CardBackgroundFillColorDefaultBrush", Color.FromArgb(13, 255, 255, 255));
@@ -387,7 +389,7 @@ internal sealed class ChoiceCard
             Width = 42,
             Height = 5,
             CornerRadius = new CornerRadius(2.5),
-            Background = new SolidColorBrush(light ? Color.FromArgb(170, 28, 28, 30) : Color.FromArgb(170, 255, 255, 255)),
+            Background = new SolidColorBrush(IslandStyle.IsLightChrome(style, light) ? Color.FromArgb(170, 28, 28, 30) : Color.FromArgb(170, 255, 255, 255)),
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(30, 0, 0, 0),

@@ -8,6 +8,7 @@ obj/
 # 发布 / 安装包产物
 publish/
 installer/Output/
+artifacts/
 
 # 临时与本地文件
 probe*.txt

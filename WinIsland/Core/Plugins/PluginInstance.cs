@@ -25,6 +25,7 @@ public sealed class PluginInstance
     private PluginTheme? _theme;
     private int _errorCount;
     private int _ignoredCallLogs;
+    private Task? _pendingLifecycle;
 
     internal PluginInstance(PluginHost host, PluginInfo info, Func<IIslandPlugin>? builtInFactory)
     {
@@ -189,6 +190,36 @@ public sealed class PluginInstance
         return false;
     }
 
+    internal bool TryEnter(PluginScope scope, string operation)
+        => !scope.IsRevoked && ReferenceEquals(_scope, scope) && TryEnter(operation);
+
+    internal void RunScoped(PluginScope scope, string phase, Action action)
+        => RunOnUI(() =>
+        {
+            if (TryEnter(scope, phase)) InvokeGuarded(phase, action);
+        });
+
+    internal Task RunScopedAsync(PluginScope scope, string phase, Func<Task> action)
+        => RunOnUIAsync(async () =>
+        {
+            if (!TryEnter(scope, phase)) return;
+            try { await action(); }
+            catch (Exception ex) { RecordScopedError(scope, phase, ex); }
+        });
+
+    internal async Task<T?> InvokeScopedAsync<T>(PluginScope scope, string phase, Func<Task<T?>> action)
+    {
+        if (!TryEnter(scope, phase)) return default;
+        try { return await action(); }
+        catch (Exception ex) { RecordScopedError(scope, phase, ex); return default; }
+    }
+
+    private void RecordScopedError(PluginScope scope, string phase, Exception exception)
+    {
+        if (!scope.IsRevoked && ReferenceEquals(_scope, scope)) RecordError(phase, exception);
+        else Log.Error($"[{phase}] 已撤销作用域的异步回调失败", exception);
+    }
+
     internal void DisposeSync()
     {
         RevokeScope();
@@ -201,6 +232,13 @@ public sealed class PluginInstance
         {
             return;
         }
+
+        if (_pendingLifecycle is { IsCompleted: false })
+        {
+            Log.Warn("上一次初始化或关闭尚未结束，请等待清理完成后再启用。");
+            return;
+        }
+        _pendingLifecycle = null;
 
         if (Info.Manifest == null)
         {
@@ -233,15 +271,17 @@ public sealed class PluginInstance
         Info.State = PluginState.Loaded;
         Log.Info("正在初始化…");
 
+        Task? initialize = null;
+        var initializingPlugin = _plugin!;
         try
         {
-            var initialize = _plugin!.InitializeAsync(context);
+            initialize = initializingPlugin.InitializeAsync(context);
             if (await Task.WhenAny(initialize, Task.Delay(TimeSpan.FromSeconds(InitTimeoutSeconds))) != initialize)
             {
-                ObserveLater(initialize, "InitializeAsync");
-                _scope = null;
-                scope.Revoke();
+                RevokeScope();
+                _plugin = null;
                 Fault("初始化", $"初始化超时（超过 {InitTimeoutSeconds} 秒），已中止启用该插件。");
+                _pendingLifecycle = CleanupFailedInitializationAsync(initialize, initializingPlugin);
                 return;
             }
 
@@ -252,14 +292,28 @@ public sealed class PluginInstance
         }
         catch (Exception ex)
         {
-            _scope = null;
-            scope.Revoke();
+            RevokeScope();
+            _plugin = null;
             Fault("初始化", $"初始化失败：{DescribeLoadError(ex)}", ex);
+            _pendingLifecycle = CleanupFailedInitializationAsync(initialize, initializingPlugin);
         }
+    }
+
+    private async Task CleanupFailedInitializationAsync(Task? initialize, IIslandPlugin plugin)
+    {
+        // 初始化仍在运行时不能与 ShutdownAsync 并发，也不能重复初始化同一代插件。
+        if (initialize != null)
+        {
+            try { await initialize; }
+            catch (Exception ex) { Log.Error("失败初始化任务结束", ex); }
+        }
+        try { await plugin.ShutdownAsync(); }
+        catch (Exception ex) { Log.Error("失败初始化后的资源清理失败", ex); }
     }
 
     private async Task DeactivateCoreAsync()
     {
+        RevokeScope();
         if (_plugin != null && Info.State == PluginState.Active)
         {
             try
@@ -268,6 +322,7 @@ public sealed class PluginInstance
                 if (await Task.WhenAny(shutdown, Task.Delay(TimeSpan.FromSeconds(ShutdownTimeoutSeconds))) != shutdown)
                 {
                     ObserveLater(shutdown, "ShutdownAsync");
+                    _pendingLifecycle = shutdown;
                     Log.Warn($"ShutdownAsync 超时（超过 {ShutdownTimeoutSeconds} 秒），已继续停用流程。");
                 }
                 else
@@ -465,20 +520,16 @@ public sealed class PluginInstance
         UnloadContext(context);
         context = null;
 
-        for (var i = 0; i < 10 && weak.IsAlive; i++)
-        {
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-        }
+        _ = CheckCollectionAsync(weak);
+        return true;
+    }
 
-        if (!weak.IsAlive)
-        {
-            Log.Info("插件程序集已卸载并回收。");
-            return true;
-        }
-
-        Log.Warn("插件程序集已请求卸载，但未能回收（可能存在残留引用）。如反复出现请重启应用。");
-        return false;
+    private async Task CheckCollectionAsync(WeakReference weak)
+    {
+        // 不在 UI 线程强制全进程 GC；正常 GC 后再观察 ALC 的可回收性。
+        for (var i = 0; i < 5 && weak.IsAlive; i++) await Task.Delay(1000).ConfigureAwait(false);
+        if (!weak.IsAlive) Log.Info("插件程序集已卸载并回收。");
+        else Log.Warn("插件程序集已请求卸载，目前仍等待 GC 或后台任务释放引用；这不代表卸载失败。");
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

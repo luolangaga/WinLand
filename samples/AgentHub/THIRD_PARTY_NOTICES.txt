@@ -1,0 +1,8 @@
+AgentHub references Agent HUD Open by jazzenchen and contributors.
+https://github.com/jazzenchen/agent-hud-open
+Reference commit: faa3a06fcf06510855ada332ea454f1f6df30ab4
+License: Apache License 2.0 (reproduced in UPSTREAM-LICENSE.txt).
+Use: Windows C# adaptation informed by provider field definitions, token accounting,
+own-engine quota protocol, session lifecycle and permission-hook response semantics.
+No upstream artwork, logos, fonts, binaries or Swift source are distributed.
+This sample is not affiliated with or endorsed by the agent vendors.

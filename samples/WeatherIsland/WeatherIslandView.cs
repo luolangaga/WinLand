@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using WinIsland.Core;
+using WinIsland.PluginViews;
 
 namespace WeatherIsland;
 
@@ -14,7 +15,7 @@ namespace WeatherIsland;
 ///   1. 所有元素一开始就常驻可视树，展开态的内容靠 Height=0 + Opacity=0 藏起来；
 ///   2. 不用 Visibility.Collapsed（无法过渡）；
 ///   3. **形态动画必须逐帧直接赋值，不能用 Storyboard**（见 <see cref="StartMorph"/> 的注释）；
-///   4. 缓动公式与宿主内置视图一致：BackEase(EaseOut, Amplitude: 0.45)。
+///   4. 帧同步的单调缓动；反转时从当前进度继续。
 /// </summary>
 public sealed class WeatherIslandView : UserControl, IMorphView
 {
@@ -25,8 +26,7 @@ public sealed class WeatherIslandView : UserControl, IMorphView
     private const double ExpandedDetailHeight = 88;
     private const int ForecastDays = 3;
 
-    /// <summary>与宿主内置视图同一条 BackEase 曲线的幅度，手感保持一致。</summary>
-    private const double BackAmplitude = 0.45;
+
 
     private static readonly string[] DefaultLabels = { "今天", "明天", "后天" };
 
@@ -42,11 +42,7 @@ public sealed class WeatherIslandView : UserControl, IMorphView
     private int _code = -1;
     private bool _isDay = true;
 
-    private readonly DispatcherQueueTimer? _morphTimer;
-    private DateTimeOffset _morphStart;
-    private TimeSpan _morphDuration = TimeSpan.FromMilliseconds(333);
-    private double _morphFrom;
-    private double _morphTarget;
+    private readonly MorphProgress _morph;
 
     /// <summary>当前形态进度：0 = 紧凑态，1 = 展开态。反转动画时从这里接着走。</summary>
     private double _progress;
@@ -123,16 +119,10 @@ public sealed class WeatherIslandView : UserControl, IMorphView
             Children = { header, _detail },
         };
 
-        // 逐帧动画用的 UI 线程定时器；拿不到就退化成「直接切终态」，绝不留下中间态
-        _morphTimer = DispatcherQueue?.CreateTimer();
-        if (_morphTimer is not null)
-        {
-            _morphTimer.Interval = TimeSpan.FromMilliseconds(16);
-            _morphTimer.IsRepeating = true;
-            _morphTimer.Tick += (_, _) => OnMorphTick();
-        }
+        // 仅在动画运行期间订阅 Rendering，卸载后立即解除订阅
+        _morph = new MorphProgress(ApplyMorph);
 
-        Unloaded += (_, _) => _morphTimer?.Stop();
+        Unloaded += (_, _) => _morph.Complete();
     }
 
     public UIElement View => this;
@@ -197,50 +187,14 @@ public sealed class WeatherIslandView : UserControl, IMorphView
     /// 结果是岛体尺寸收回去了、插件的 Height 却卡在中间值，整块内容错位且不再响应 hover。
     /// 宿主内置视图能安全使用 Storyboard，是因为它们在宿主程序集里；插件侧必须逐帧赋值。
     /// </summary>
-    private void StartMorph(double target, TimeSpan duration)
-    {
-        _morphFrom = _progress;
-        _morphTarget = target;
-        _morphDuration = duration > TimeSpan.Zero ? duration : TimeSpan.FromMilliseconds(1);
-        _morphStart = DateTimeOffset.UtcNow;
+    private void StartMorph(double target, TimeSpan duration) => _morph.To(target, duration);
 
-        if (_morphTimer is null)
-        {
-            ApplyMorph(target);
-            return;
-        }
-
-        _morphTimer.Start();
-    }
-
-    private void OnMorphTick()
-    {
-        var elapsed = (DateTimeOffset.UtcNow - _morphStart).TotalMilliseconds;
-        var durationMs = Math.Max(1, _morphDuration.TotalMilliseconds);
-        var t = Math.Clamp(elapsed / durationMs, 0, 1);
-
-        ApplyMorph(_morphFrom + (_morphTarget - _morphFrom) * BackEaseOut(t));
-
-        if (t >= 1)
-        {
-            _morphTimer?.Stop();
-            ApplyMorph(_morphTarget);   // 收尾时锁定终态，避免残留中间值
-        }
-    }
-
-    /// <summary>BackEase(EaseOut, A) = 1 + (A+1)(t-1)³ + A(t-1)²，与 XAML 那条曲线等价。</summary>
-    private static double BackEaseOut(double t)
-    {
-        var d = t - 1;
-        return 1 + (BackAmplitude + 1) * d * d * d + BackAmplitude * d * d;
-    }
-
-    /// <summary>把 0~1 的形态进度铺到各元素上。progress 会因 BackEase 略微越过 0/1。</summary>
+    /// <summary>把 0~1 的形态进度铺到各元素上。progress 始终在 0/1 内，收缩不越界。</summary>
     private void ApplyMorph(double progress)
     {
         _progress = progress;
 
-        // Height 不能为负（BackEase 在终点附近会略微下降到目标值以下）
+        // 布局尺寸保持非负
         _detail.Height = Math.Max(0, ExpandedDetailHeight * progress);
         _detail.Opacity = Math.Clamp(progress, 0, 1);
 

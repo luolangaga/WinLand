@@ -1,3 +1,4 @@
+using System.Text.Json;
 using WinIsland.Core.Plugins;
 
 namespace WinIsland.Core;
@@ -18,6 +19,15 @@ internal sealed class SingleInstance : IDisposable
     private const string MutexName = @"Local\WinIsland.SingleInstance";
     private const string ActivationEventName = @"Local\WinIsland.SingleInstance.Activate";
 
+    /// <summary>
+    /// 请求交接区。**必须是文件而不是命名共享内存**：重复启动的进程写完就退，
+    /// 进程一退，它持有的内存映射句柄随之关闭 —— 映射对象当场销毁，
+    /// 在跑的实例再去 OpenExisting 只会拿到 FileNotFoundException。
+    /// 文件没有这个问题（文件系统持有它），并且天然支持「同时来了两条请求」。
+    /// </summary>
+    private static string RequestsDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinIsland", "requests");
+
     /// <summary>闸门本身。持有它 = 这个进程就是那个唯一实例，必须活到进程结束。</summary>
     private readonly Mutex _mutex;
 
@@ -33,10 +43,11 @@ internal sealed class SingleInstance : IDisposable
     }
 
     /// <summary>
-    /// 抢闸门：抢到返回实例；已经有实例在跑则返回 null —— 此时已经通知过在跑的那个实例，
-    /// 调用方提醒用户（<see cref="ReportDuplicateLaunch"/>）之后退出即可。
+    /// 抢闸门：抢到返回实例；已经有实例在跑则返回 null —— 此时已经把
+    /// <paramref name="request"/> 交给在跑的那个实例，调用方提醒用户之后退出即可。
     /// </summary>
-    public static SingleInstance? TryAcquire()
+    /// <param name="request">要交给在跑实例的自动化请求（null = 只是重复点了图标）。</param>
+    public static SingleInstance? TryAcquire(CommandRequest? request = null)
     {
         EventWaitHandle? activation = null;
         Mutex? mutex = null;
@@ -59,8 +70,10 @@ internal sealed class SingleInstance : IDisposable
             return new SingleInstance(mutex, activation);
         }
 
-        // 已经有实例在跑：先让它拿到抢前台的资格（它把设置窗口调到前面时才不会被系统的前台锁挡住），再喊它一声
+        // 已经有实例在跑：先让它拿到抢前台的资格（它把设置窗口调到前面时才不会被系统的前台锁挡住），
+        // 再把参数放进共享内存、喊它一声
         Win32.AllowSetForegroundWindow(Win32.ASFW_ANY);
+        WriteRequest(request);
         activation.Set();
 
         activation.Dispose();
@@ -70,16 +83,17 @@ internal sealed class SingleInstance : IDisposable
 
     /// <summary>
     /// 在跑的实例调用：每来一次重复启动就回调一次（线程池线程，调用方自己编组到 UI 线程）。
+    /// 回调拿到的是**这一批**待处理请求（可能为空 = 用户只是又点了一次图标）。
     /// 早到的通知不会丢 —— 自动重置事件会把「没人等着的时候收到的信号」留到下一次等待。
     /// </summary>
-    public void ListenForActivation(Action onActivated)
+    public void ListenForActivation(Action<IReadOnlyList<CommandRequest>> onActivated)
         => _wait = ThreadPool.RegisterWaitForSingleObject(
             _activation,
             (_, _) =>
             {
                 try
                 {
-                    onActivated();
+                    onActivated(TakeRequests());
                 }
                 catch (Exception)
                 {
@@ -91,19 +105,24 @@ internal sealed class SingleInstance : IDisposable
             executeOnlyOnce: false);
 
     /// <summary>
-    /// 重复启动的收尾：记一条日志 + 弹一个原生提示框，调用方随后直接退出。
-    /// 提示框必须是原生的 —— 这个位置在 XAML 起来之前，没有任何 XAML 对话框可用。
+    /// 重复启动的收尾：记一条日志 + 原生提示。提示框必须是原生的 ——
+    /// 这个位置在 XAML 起来之前，没有任何 XAML 对话框可用。
+    /// 带自动化参数时不再弹框（脚本调用不该被人点一下）：只写日志。
     /// </summary>
-    public static void ReportDuplicateLaunch()
+    public static void ReportDuplicateLaunch(bool silent = false)
     {
         try
         {
-            new PluginLogService().Host.Warn("检测到重复启动：已经有一个 WinIsland 在运行，本次启动被拒绝。");
+            new PluginLogService().Host.Warn(silent
+                ? "已有实例在运行：参数已转交，本次进程退出。"
+                : "检测到重复启动：已经有一个 WinIsland 在运行，本次启动被拒绝。");
         }
         catch (Exception)
         {
             // 日志写不出来不影响提醒
         }
+
+        if (silent) return;
 
         Win32.ShowStartupMessage(
             "WinIsland 已经在运行，不能重复打开。\n\n程序只允许开一个实例，请使用托盘里的那个（双击托盘图标打开设置）。",
@@ -123,6 +142,59 @@ internal sealed class SingleInstance : IDisposable
         {
             return true;
         }
+    }
+
+    private static void WriteRequest(CommandRequest? request)
+    {
+        if (request == null) return;
+        try
+        {
+            Directory.CreateDirectory(RequestsDirectory);
+            // 文件名带时间戳与随机后缀：并发写入互不覆盖，读取方按名字（= 时间）排序即可保序
+            var name = $"{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}.json";
+            File.WriteAllText(Path.Combine(RequestsDirectory, name), CommandLine.Serialize(request));
+        }
+        catch (Exception)
+        {
+            // 交接失败不影响「已经在跑」这个事实：老实例照样只是把设置窗口亮出来
+        }
+    }
+
+    /// <summary>
+    /// 取出并消费**所有**待处理请求（按写入顺序）。没有请求时返回空数组。
+    /// 每次都在通知到达后整批取走：一批里可能积了不止一条（脚本连发、事件合并）。
+    /// </summary>
+    internal static IReadOnlyList<CommandRequest> TakeRequests()
+    {
+        var result = new List<CommandRequest>();
+        try
+        {
+            if (!Directory.Exists(RequestsDirectory)) return result;
+
+            foreach (var path in Directory.GetFiles(RequestsDirectory, "*.json").OrderBy(p => p, StringComparer.Ordinal))
+            {
+                try
+                {
+                    var request = CommandLine.Deserialize(File.ReadAllText(path));
+                    if (request != null) result.Add(request);
+                }
+                catch (Exception)
+                {
+                    // 单条坏文件不能卡住后面的请求
+                }
+                finally
+                {
+                    try { File.Delete(path); }
+                    catch (Exception) { /* 下次启动会再扫到它 */ }
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // 目录读不了：当作没有请求
+        }
+
+        return result;
     }
 
     public void Dispose()

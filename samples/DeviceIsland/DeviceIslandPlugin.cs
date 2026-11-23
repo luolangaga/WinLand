@@ -330,14 +330,13 @@ public sealed class DeviceIslandPlugin : IslandPluginBase
     }
 
     /// <summary>
-    /// 岛体换主题：岛视图就地重刷配色；聚光卡下次打开时自然按新主题重建
-    /// （它是另一棵可视树，开着的时候不折腾它）。
+    /// 岛体与聚光卡同时就地重刷配色，保持当前内容与滚动位置。
     /// </summary>
     private void OnThemeChanged()
     {
         Log.Info($"岛体主题已切换为{(Theme.IsLight ? "浅色" : "深色")}，重刷岛视图配色。");
         _view?.RefreshTheme();
-        _spotlight = null;
+        _spotlight?.RefreshTheme();
     }
 
     /// <summary>点击岛体 → 打开「超级展开」聚光卡（当前所有设备的完整列表）。</summary>

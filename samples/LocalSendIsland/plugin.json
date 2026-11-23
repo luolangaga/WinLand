@@ -1,0 +1,13 @@
+{
+  "id": "localsend-share",
+  "name": "LocalSend 分享",
+  "version": "1.0.1",
+  "entry_dll": "LocalSendIsland.dll",
+  "api_version": 2,
+  "min_host_version": "2.4.0",
+  "description": "拖入文件、文件夹、文本或图片，交给本机 LocalSend 选择设备分享。",
+  "author": "luolan",
+  "icon_glyph": "\uE72D",
+  "license": "MIT",
+  "tags": ["share", "localsend", "files"]
+}

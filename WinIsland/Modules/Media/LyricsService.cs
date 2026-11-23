@@ -97,8 +97,8 @@ public sealed class LyricsService
         }
 
         var exact = await GetJsonAsync($"https://lrclib.net/api/get?{query}", cancellationToken);
-        var synced = exact is { } document ? ReadLrclibSynced(document) : null;
-        if (synced != null) return Parse(synced);
+        var exactLines = exact is { } document ? ReadLrclibLines(document) : null;
+        if (exactLines is { Count: > 0 }) return exactLines;
 
         var search = await GetJsonAsync(
             $"https://lrclib.net/api/search?q={Uri.EscapeDataString($"{title} {artist}")}", cancellationToken);
@@ -106,14 +106,12 @@ public sealed class LyricsService
 
         foreach (var item in results.EnumerateArray())
         {
-            if (ReadLrclibSynced(item) is not { } candidate) continue;
-
             var candidateTitle = item.TryGetProperty("trackName", out var t) ? t.GetString() : null;
             var candidateArtist = item.TryGetProperty("artistName", out var a) ? a.GetString() : null;
             if (!Matches(title, candidateTitle) || !Matches(artist, candidateArtist)) continue;
 
-            var parsed = Parse(candidate);
-            if (parsed.Count > 0) return parsed;
+            var parsed = ReadLrclibLines(item);
+            if (parsed is { Count: > 0 }) return parsed;
         }
 
         return null;
@@ -125,6 +123,16 @@ public sealed class LyricsService
            && synced.ValueKind == JsonValueKind.String
             ? synced.GetString()
             : null;
+
+    private static IReadOnlyList<LyricLine>? ReadLrclibLines(JsonElement element)
+    {
+        var synced = Parse(ReadLrclibSynced(element));
+        if (synced.Count > 0) return synced;
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("plainLyrics", out var plain)
+            || plain.ValueKind != JsonValueKind.String) return null;
+        return plain.GetString()?.Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0)
+            .Select(line => new LyricLine(TimeSpan.MinValue, line)).ToArray();
+    }
 
     // ---- 网易云（兜底）----
 
@@ -145,7 +153,11 @@ public sealed class LyricsService
             return null;
         }
 
-        if (!songs[0].TryGetProperty("id", out var idElement) || !idElement.TryGetInt64(out var songId))
+        var song = songs.EnumerateArray().FirstOrDefault(item =>
+            item.TryGetProperty("name", out var name) && Matches(title, name.GetString()) &&
+            (string.IsNullOrWhiteSpace(artist) || item.TryGetProperty("artists", out var artists) &&
+             artists.ValueKind == JsonValueKind.Array && artists.EnumerateArray().Any(a => a.TryGetProperty("name", out var n) && Matches(artist, n.GetString()))));
+        if (song.ValueKind != JsonValueKind.Object || !song.TryGetProperty("id", out var idElement) || !idElement.TryGetInt64(out var songId))
         {
             return null;
         }
@@ -220,6 +232,7 @@ public sealed class LyricsService
 
     private async Task SaveToDiskAsync(string key, IReadOnlyList<LyricLine> lines)
     {
+        if (lines.Any(line => line.Time < TimeSpan.Zero)) return;
         try
         {
             Directory.CreateDirectory(_cacheDirectory);
@@ -262,6 +275,7 @@ public sealed class LyricsService
 
     private static bool Matches(string expected, string? candidate)
     {
+        if (string.IsNullOrWhiteSpace(expected)) return true;
         if (string.IsNullOrWhiteSpace(candidate)) return false;
 
         static string Normalize(string value) => new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());

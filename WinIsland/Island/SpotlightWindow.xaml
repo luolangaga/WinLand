@@ -17,7 +17,7 @@
         x:Name="RootCanvas"
         Background="Transparent"
         KeyDown="RootCanvas_KeyDown"
-        RequestedTheme="Dark">
+        >
         <Rectangle
             x:Name="Scrim"
             Fill="#FF000000"
@@ -28,7 +28,10 @@
             BorderBrush="#1AFFFFFF"
             BorderThickness="1"
             CornerRadius="28">
-            <ContentPresenter x:Name="SpotlightHost" />
+            <Grid>
+                <ContentPresenter x:Name="SpotlightLeaving" IsHitTestVisible="False" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                <ContentPresenter x:Name="SpotlightHost" />
+            </Grid>
         </Border>
         <TextBlock
             x:Name="Hint"

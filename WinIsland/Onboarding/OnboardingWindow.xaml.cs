@@ -2,7 +2,9 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Hosting;
+using Microsoft.UI.Composition;
+using System.Numerics;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Storage.Streams;
 using WinIsland.Core;
@@ -47,6 +49,7 @@ public sealed partial class OnboardingWindow : Window
     private readonly PluginHost _plugins;
     private readonly Action _openSettings;
     private readonly List<Border> _dots = new();
+    private readonly Dictionary<FrameworkElement, int> _panelVersions = new();
     private readonly Dictionary<string, Button> _installButtons = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ProgressBar> _progressBars = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _cts = new();
@@ -116,6 +119,7 @@ public sealed partial class OnboardingWindow : Window
         Closed += (_, _) =>
         {
             _cts.Cancel();
+            foreach (var panel in _panelVersions.Keys.ToArray()) ResetPanel(panel);
             _settings.Set(DoneSettingKey, true);
         };
     }
@@ -159,13 +163,14 @@ public sealed partial class OnboardingWindow : Window
 
             if (current)
             {
+                bool entering = panel.Visibility != Visibility.Visible;
                 panel.Visibility = Visibility.Visible;
-                AnimateSlide(panel, from: direction * width, to: 0, onCompleted: null);
+                AnimateSlide(panel, from: direction * Math.Min(width, 80), to: 0, onCompleted: null, initialize: entering);
             }
             else if (panel.Visibility == Visibility.Visible)
             {
                 int panelIndex = i;
-                AnimateSlide(panel, from: 0, to: -direction * width, onCompleted: () =>
+                AnimateSlide(panel, from: 0, to: -direction * Math.Min(width, 80), onCompleted: () =>
                 {
                     // 快速连点时，旧步骤的回调不能把「正在显示的步骤」收起来
                     if (_step != panelIndex)
@@ -212,81 +217,47 @@ public sealed partial class OnboardingWindow : Window
         }
     }
 
-    private static void AnimateSlide(FrameworkElement panel, double from, double to, Action? onCompleted)
+    private void AnimateSlide(FrameworkElement panel, double from, double to, Action? onCompleted, bool initialize = false)
     {
-        // 与岛展开动画同节奏（333ms）；基准值 = 终值 + FillBehavior.Stop，
-        // 动画结束后不回弹、也不留下悬挂的动画覆盖后续对 X 的直接赋值
-        const double durationMs = 333;
-
-        var transform = new TranslateTransform { X = to };
-        panel.RenderTransform = transform;
-
-        var storyboard = new Storyboard();
-        var animation = new DoubleAnimation
+        ElementCompositionPreview.SetIsTranslationEnabled(panel, true);
+        var visual = Motion.Visual(panel);
+        if (initialize || visual.Properties.TryGetVector3("Translation", out _) != CompositionGetValueStatus.Succeeded)
+            visual.Properties.InsertVector3("Translation", new Vector3((float)(Motion.Enabled ? from : 0), 0, 0));
+        int version = _panelVersions.GetValueOrDefault(panel) + 1;
+        _panelVersions[panel] = version;
+        var batch = visual.Compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
+        Motion.Vector(visual, "Translation", new Vector3((float)to, 0, 0), 280);
+        Motion.Scalar(visual, "Opacity", to == 0 ? 1 : 0, 220);
+        batch.Completed += (_, _) =>
         {
-            From = from,
-            To = to,
-            FillBehavior = FillBehavior.Stop,
-            Duration = new Duration(TimeSpan.FromMilliseconds(durationMs)),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            batch.Dispose();
+            if (!_cts.IsCancellationRequested && _panelVersions.GetValueOrDefault(panel) == version) onCompleted?.Invoke();
         };
-        Storyboard.SetTarget(animation, transform);
-        Storyboard.SetTargetProperty(animation, "X");
-        storyboard.Children.Add(animation);
-
-        if (onCompleted != null)
-        {
-            storyboard.Completed += (_, _) => onCompleted();
-        }
-
-        storyboard.Begin();
+        batch.End();
     }
 
-    /// <summary>标题、步骤计数与圆点同方向轻微滑入 + 淡入，跟页面推入保持一个方向感。</summary>
     private void AnimateHeader(int direction)
     {
-        const double durationMs = 240;
-
-        var transform = new TranslateTransform { X = 0 };
-        StepHeader.RenderTransform = transform;
-
-        var storyboard = new Storyboard();
-
-        var slide = new DoubleAnimation
-        {
-            From = direction * 26,
-            To = 0,
-            FillBehavior = FillBehavior.Stop,
-            Duration = new Duration(TimeSpan.FromMilliseconds(durationMs)),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-        };
-        Storyboard.SetTarget(slide, transform);
-        Storyboard.SetTargetProperty(slide, "X");
-        storyboard.Children.Add(slide);
-
-        var fade = new DoubleAnimation
-        {
-            From = 0.2,
-            To = 1,
-            FillBehavior = FillBehavior.Stop,
-            Duration = new Duration(TimeSpan.FromMilliseconds(durationMs)),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-        };
-        Storyboard.SetTarget(fade, StepHeader);
-        Storyboard.SetTargetProperty(fade, "Opacity");
-        storyboard.Children.Add(fade);
-
-        storyboard.Begin();
+        // Keep the title readable while the page moves; a subtle fade is sufficient.
+        var visual = Motion.Visual(StepHeader);
+        using var fade = visual.Compositor.CreateScalarKeyFrameAnimation();
+        fade.Duration = Motion.Duration(220);
+        fade.InsertExpressionKeyFrame(0, "this.StartingValue");
+        fade.InsertKeyFrame(0.2f, Motion.Enabled ? 0.65f : 1);
+        fade.InsertKeyFrame(1, 1, Motion.Ease(visual.Compositor));
+        visual.StartAnimation("Opacity", fade);
     }
 
-    private static void ResetPanel(FrameworkElement panel)
+    private void ResetPanel(FrameworkElement panel)
     {
-        panel.Opacity = 1;
-        if (panel.RenderTransform is TranslateTransform transform)
-        {
-            transform.X = 0;
-            transform.Y = 0;
-        }
+        _panelVersions[panel] = _panelVersions.GetValueOrDefault(panel) + 1;
+        ElementCompositionPreview.SetIsTranslationEnabled(panel, true);
+        var visual = Motion.Visual(panel);
+        if (visual.Properties.TryGetVector3("Translation", out _) == CompositionGetValueStatus.Succeeded)
+            visual.StopAnimation("Translation");
+        visual.StopAnimation("Opacity");
+        visual.Properties.InsertVector3("Translation", Vector3.Zero);
+        visual.Opacity = 1;
     }
 
     private void Next_Click(object sender, RoutedEventArgs e)

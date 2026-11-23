@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl x:Class="WinIsland.Settings.PluginCenterPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <Style x:Key="SecondaryText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+        </Style>
+        <Style x:Key="AccentText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+        </Style>
+        <Style x:Key="ErrorText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{ThemeResource SystemFillColorCriticalBrush}" />
+        </Style>
+        <Style x:Key="CautionText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{ThemeResource SystemFillColorCautionBrush}" />
+        </Style>
+        <Style x:Key="MakerNoteStyle" TargetType="Border">
+            <Setter Property="BorderBrush" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+        </Style>
+        <Style x:Key="CodePanel" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource ControlFillColorSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+        </Style>
+        <Style x:Key="PluginCard" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="16" />
+            <Setter Property="Padding" Value="20" />
+        </Style>
+        <Style x:Key="LocalLogo" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource ControlFillColorSecondaryBrush}" />
+        </Style>
+        <Style x:Key="LocalIcon" TargetType="FontIcon">
+            <Setter Property="Foreground" Value="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+        </Style>
+    </UserControl.Resources>
+    <Grid RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid x:Name="Hero" ColumnSpacing="20" MinHeight="128">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <StackPanel Spacing="8" VerticalAlignment="Center">
+                <TextBlock Text="让灵感，住进小岛。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" />
+                <TextBlock Text="插件中心" Style="{StaticResource TitleLargeTextBlockStyle}" />
+                <TextBlock Text="发现新的可能，也让每一个插件井然有序。" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="SummaryText" FontSize="12" TextWrapping="Wrap" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" AutomationProperties.AutomationId="PluginCenter.Summary" />
+            </StackPanel>
+            <Border x:Name="HeroArt" Grid.Column="1" Width="112" Height="112" CornerRadius="28" Background="{ThemeResource AccentFillColorDefaultBrush}" VerticalAlignment="Center" IsHitTestVisible="False">
+                <Grid>
+                    <Border Width="74" Height="32" CornerRadius="16" BorderBrush="{ThemeResource TextOnAccentFillColorPrimaryBrush}" BorderThickness="1" Opacity="0.35" Rotation="-28" />
+                    <Border Width="74" Height="32" CornerRadius="16" BorderBrush="{ThemeResource TextOnAccentFillColorPrimaryBrush}" BorderThickness="1" Opacity="0.35" Rotation="28" />
+                    <FontIcon Glyph="&#xE7B8;" FontSize="32" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                </Grid>
+            </Border>
+        </Grid>
+        <StackPanel Grid.Row="1" Spacing="8">
+            <InfoBar x:Name="StatusBar" IsOpen="False" IsClosable="True" AutomationProperties.AutomationId="PluginCenter.Status" />
+            <InfoBar x:Name="WarningBar" IsOpen="False" Severity="Warning" Title="插件发现提示" />
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <AutoSuggestBox x:Name="SearchBox" PlaceholderText="搜索名称、作者或标签" QueryIcon="Find" TextChanged="Search_TextChanged" AutomationProperties.Name="搜索插件" AutomationProperties.AutomationId="PluginCenter.Search" />
+                <Button x:Name="InstallButton" Grid.Column="1" Click="Install_Click" ToolTipService.ToolTip="从本机安装 .lwp 插件包" AutomationProperties.Name="本地安装插件包" AutomationProperties.AutomationId="InstallButton">
+                    <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE898;" FontSize="14" /><TextBlock Text="本地安装" /></StackPanel>
+                </Button>
+                <Button Grid.Column="2" AutomationProperties.Name="插件中心选项" AutomationProperties.AutomationId="PluginCenter.Options">
+                    <FontIcon Glyph="&#xE712;" FontSize="16" />
+                    <Button.Flyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem Text="刷新商店" Click="Refresh_Click" Icon="Refresh" AutomationProperties.AutomationId="RefreshButton" />
+                            <MenuFlyoutItem Text="用 AI 做插件" Click="MakePlugin_Click" AutomationProperties.AutomationId="MakePluginButton" />
+                            <MenuFlyoutSeparator />
+                            <MenuFlyoutItem Text="插件文件夹" Click="OpenFolder_Click" Icon="OpenFile" AutomationProperties.AutomationId="OpenFolderButton" />
+                            <MenuFlyoutItem Text="商店源设置" Click="Source_Click" AutomationProperties.AutomationId="PluginCenter.Source" />
+                            <MenuFlyoutItem Text="社区仓库" Click="Repo_Click" AutomationProperties.AutomationId="RepoButton" />
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
+            </Grid>
+        </StackPanel>
+        <Grid Grid.Row="2" RowSpacing="8">
+            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+            <SelectorBar x:Name="Views" SelectionChanged="Views_SelectionChanged" AutomationProperties.AutomationId="PluginCenter.Views">
+                <SelectorBarItem x:Name="DiscoverTab" Text="发现" AutomationProperties.AutomationId="PluginCenter.Discover" />
+                <SelectorBarItem x:Name="InstalledTab" Text="已安装" AutomationProperties.AutomationId="PluginCenter.Installed" />
+                <SelectorBarItem x:Name="UpdatesTab" Text="可更新" AutomationProperties.AutomationId="PluginCenter.Updates" />
+            </SelectorBar>
+            <Grid Grid.Row="1" ColumnSpacing="8">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <TextBlock x:Name="ResultText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.AutomationId="PluginCenter.Results" />
+                <ProgressRing x:Name="Busy" Grid.Column="1" Width="16" Height="16" IsActive="False" AutomationProperties.Name="正在加载商店" />
+            </Grid>
+        </Grid>
+        <Grid Grid.Row="3">
+            <GridView x:Name="PluginList" SelectionMode="None" IsItemClickEnabled="False" Padding="0,0,0,12" SizeChanged="PluginList_SizeChanged" AutomationProperties.AutomationId="PluginList" HorizontalContentAlignment="Stretch">
+                <GridView.ItemsPanel><ItemsPanelTemplate><ItemsWrapGrid Orientation="Horizontal" /></ItemsPanelTemplate></GridView.ItemsPanel>
+                <GridView.ItemContainerStyle>
+                    <Style TargetType="GridViewItem" BasedOn="{StaticResource DefaultGridViewItemStyle}">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="Margin" Value="0,0,12,12" />
+                    </Style>
+                </GridView.ItemContainerStyle>
+            </GridView>
+            <StackPanel x:Name="EmptyState" Visibility="Collapsed" Spacing="12" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="320">
+                <FontIcon x:Name="EmptyIcon" Glyph="&#xE721;" FontSize="36" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                <TextBlock x:Name="EmptyText" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                <TextBlock x:Name="EmptyHint" TextWrapping="Wrap" TextAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Button Content="刷新商店" Click="Refresh_Click" HorizontalAlignment="Center" AutomationProperties.AutomationId="PluginCenter.EmptyRefresh" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</UserControl>

@@ -25,13 +25,22 @@
         </TitleBar>
 
         <NavigationView
-            x:Name="Nav"
+ AutomationProperties.AutomationId="Nav"            x:Name="Nav"
             Grid.Row="1"
             IsBackButtonVisible="Collapsed"
             IsSettingsVisible="False"
             OpenPaneLength="220"
             PaneDisplayMode="Left"
             SelectionChanged="Nav_SelectionChanged">
+            <NavigationView.PaneHeader>
+                <StackPanel Margin="16,12,16,20" Spacing="4">
+                    <TextBlock Text="WinIsland" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Text="你的桌面，轻盈有序" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+            </NavigationView.PaneHeader>
+            <NavigationView.PaneFooter>
+                <TextBlock Text="设置即时保存" Margin="16,12,16,20" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </NavigationView.PaneFooter>
             <Frame x:Name="ContentFrame" IsNavigationStackEnabled="False">
                 <Frame.ContentTransitions>
                     <TransitionCollection>
